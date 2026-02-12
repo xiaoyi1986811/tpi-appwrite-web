@@ -4740,7 +4740,7 @@ window.exportAsCSV = function() {
   <!-- 登录区 (GitHub OAuth) -->
   <div id="tpi-auth-panel" style="max-width: 820px;">
     <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:center;">
-      <button type="button" id="githubLoginBtn" style="padding:14px 28px; background: linear-gradient(135deg,#24292e,#1a1e22); color:white; border:none; border-radius:10px; font-weight:600; cursor:pointer; font-size:15px; display:flex; align-items:center; gap:10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); transition: transform 0.2s;">
+      <button type="button" id="githubLoginBtn" style="padding:14px 28px; background: linear-gradient(135deg,#24292e,#1a1e22); color:white; border:none; border-radius:10px; font-weight:600; cursor:pointer; font-size:15px; display:flex; align-items:center; gap:10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); transition: transform 0.2s;" onclick="try{window.tpiLogin&&window.tpiLogin()}catch(e){console.error(e)}">
         <svg height="24" width="24" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
         </svg>
@@ -26071,13 +26071,26 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(() => {
         ScoreDashboard.update();
     }, 5000);
-
-  // GitHub 登录按钮事件监听
+  // GitHub 登录按钮事件监听（加固：确保点击一定触发 tpiLogin）
   const githubBtn = document.getElementById('githubLoginBtn');
   if (githubBtn) {
-    githubBtn.addEventListener('click', function(){
-      window.tpiLogin();
-    });
+    const _doLogin = function(ev){
+      try{ ev && ev.preventDefault && ev.preventDefault(); }catch(_){}
+      try{ ev && ev.stopPropagation && ev.stopPropagation(); }catch(_){}
+      try{
+        if (typeof window.tpiLogin === 'function') return window.tpiLogin();
+        console.error('❌ tpiLogin 未定义，无法触发 OAuth 跳转');
+      }catch(e){
+        console.error('❌ 调用 tpiLogin 失败:', e);
+      }
+    };
+
+    // 1) inline onclick 之外，再强制赋值 onclick（避免事件被覆盖/丢失）
+    githubBtn.onclick = _doLogin;
+
+    // 2) 额外再加一个 addEventListener（双保险）
+    githubBtn.addEventListener('click', _doLogin, { passive: false });
+
     // 添加悬停效果
     githubBtn.addEventListener('mouseenter', function(){
       this.style.transform = 'translateY(-2px)';
@@ -30063,7 +30076,14 @@ try{
   const account = new Appwrite.Account(client);
   const databases = new Appwrite.Databases(client);
 
-  // --------- storage helpers (use existing safe wrappers if present) ----------
+  
+  // 暴露到全局，便于调试（不影响现有逻辑）
+  window.__tpi_appwrite = window.__tpi_appwrite || {};
+  window.__tpi_appwrite.client = client;
+  window.__tpi_appwrite.account = account;
+  window.__tpi_appwrite.databases = databases;
+
+// --------- storage helpers (use existing safe wrappers if present) ----------
   const lsGet = (k, d) => (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
   const lsSet = (k, v) => (typeof window.__tpi_ls_set === 'function') ? window.__tpi_ls_set(k, v) : (localStorage.setItem(k, v), true);
   const lsRemove = (k) => (typeof window.__tpi_ls_remove === 'function') ? window.__tpi_ls_remove(k) : (localStorage.removeItem(k), true);
@@ -30210,20 +30230,39 @@ window.__tpi_syncDateToMain = function(){
 
 // ---------------- public functions (GitHub OAuth) ----------------
   // GitHub OAuth 登录函数
-  window.tpiLogin = async function(){
+  window.tpiLogin = function(){
     try{
-      tpiShowMsg('tpi-login-msg', '⏳ 正在跳转到 GitHub 进行授权...');
-      // 使用 GitHub OAuth 登录
-      // successURL 和 failureURL 设置为当前页面
-      await account.createOAuth2Session(
-      'github',  // provider
-      'https://xiaoyi1986811.github.io/tpi-appwrite-web/',
-      'https://xiaoyi1986811.github.io/tpi-appwrite-web/'
-    );
-// 注意：此处代码不会执行，因为会跳转到 GitHub
+      // 防抖：避免重复点击导致浏览器/SDK 行为异常
+      if (window.__tpi_oauth_inflight) {
+        tpiShowMsg('tpi-login-msg', '⏳ 已在跳转授权流程中，请稍候...', false);
+        return;
+      }
+      window.__tpi_oauth_inflight = true;
+      window.__tpi_last_login_click = Date.now();
+
+      tpiShowMsg('tpi-login-msg', '⏳ 正在跳转到 GitHub 进行授权...', false);
+
+      if (!window.Appwrite || !account || !account.createOAuth2Session) {
+        window.__tpi_oauth_inflight = false;
+        console.error('❌ Appwrite Account 未就绪，无法发起 OAuth');
+        tpiShowMsg('tpi-login-msg', '❌ 登录组件未就绪（account 未初始化）', true);
+        return;
+      }
+
+      // 关键：不要 await，保持“用户手势”上下文，避免部分浏览器偶发阻止跳转
+      account.createOAuth2Session(
+        'github',
+        'https://xiaoyi1986811.github.io/tpi-appwrite-web/',
+        'https://xiaoyi1986811.github.io/tpi-appwrite-web/'
+      );
+
+      // 注意：此处通常不会执行（会跳转到 GitHub）
+      // 如果未跳转，释放 inflight 标记，避免卡死
+      setTimeout(() => { window.__tpi_oauth_inflight = false; }, 1500);
     }catch(err){
+      window.__tpi_oauth_inflight = false;
       console.error('❌ GitHub 登录失败:', err);
-      tpiShowMsg('tpi-login-msg', `❌ 登录失败: ${err.message}`, true);
+      try{ tpiShowMsg('tpi-login-msg', `❌ 登录失败: ${err && err.message ? err.message : err}`, true); }catch(_){}
     }
   };
 
