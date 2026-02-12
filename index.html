@@ -24231,7 +24231,6 @@ window.addEventListener('resize', function() {
                 const modal = document.createElement('div');
                 modal.innerHTML = modalHtml;
                 document.body.appendChild(modal.firstElementChild);
-            }
         } catch (error) {
             console.error('显示操作历史失败:', error);
             alert('❌ 显示操作历史失败: ' + error.message + '\n\n请查看控制台了解详情');
@@ -27606,6 +27605,7 @@ window.addEventListener('unhandledrejection', function(event) {
 });
 
 console.log('✅ 全局错误监控已启动');
+})();
 console.log('');
 
 </script>
@@ -30050,12 +30050,12 @@ try{
   const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
 
   // 初始化 Appwrite 客户端
-  const client = new Appwrite.Client()
-    .setEndpoint(APPWRITE_ENDPOINT)
+  var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
+    client.setEndpoint(APPWRITE_ENDPOINT)
     .setProject(APPWRITE_PROJECT_ID);
 
-  const account = new Appwrite.Account(client);
-  const databases = new Appwrite.Databases(client);
+var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
+var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
   // --------- storage helpers (use existing safe wrappers if present) ----------
   const lsGet = (k, d) => (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
@@ -30541,12 +30541,12 @@ const APPWRITE_PROJECT_ID = '698d998e003c903490e1';       // ←←← 必须替
 // --- 配置区结束 ---
 
 // 初始化 Appwrite 客户端
-const client = new Appwrite.Client()
-    .setEndpoint(APPWRITE_ENDPOINT)
+var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
+    client.setEndpoint(APPWRITE_ENDPOINT)
     .setProject(APPWRITE_PROJECT_ID);
 
-const account = new Appwrite.Account(client);
-const databases = new Appwrite.Databases(client);
+var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
+var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
 // 数据库和集合 ID (需与你在 Appwrite 控制台创建的一致)
 const DATABASE_ID = 'tpi_database';
@@ -30847,12 +30847,12 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
 // ========== Appwrite 集成区 (请在此处粘贴) ==========
 
 // 1. 初始化客户端 (替换为你的真实ID)
-const client = new Appwrite.Client()
-  .setEndpoint('https://sgp.cloud.appwrite.io/v1')
+var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
+  client.setEndpoint(APPWRITE_ENDPOINT)
   .setProject('698d998e003c903490e1'); // ← 必须替换!
 
-const account = new Appwrite.Account(client);
-const databases = new Appwrite.Databases(client);
+var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
+var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 const DB_ID = 'tpi_database';
 const COL_ID = 'daily_records';
 
