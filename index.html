@@ -30062,11 +30062,41 @@ try{
    - 仍以本页现有 localStorage/collectDailyData/restoreUIFromData 为数据载体
 ========================================================= */
 (function(){
-  // ⚠️ TODO: 请替换为你的 Appwrite 配置
-  const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
-  const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
-  const APPWRITE_DATABASE_ID = 'tpi_database'; // 数据库 ID
-  const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
+  // ⚠️ Appwrite 配置（支持“无改代码”覆盖）
+// 1) 默认值：下面四个常量
+// 2) URL 覆盖：在网址后加 ?db=你的DatabaseID&col=你的CollectionID （首次访问会自动记住）
+// 3) 本地记住：localStorage 键 tpi_appwrite_db / tpi_appwrite_col
+const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // Appwrite 端点
+const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 项目 ID
+
+function __tpi_getQS(name){
+  try{ return new URLSearchParams(location.search).get(name) || ''; }catch(_){ return ''; }
+}
+function __tpi_getLS(key){
+  try{ return localStorage.getItem(key) || ''; }catch(_){ return ''; }
+}
+function __tpi_setLS(key, val){
+  try{ localStorage.setItem(key, val); }catch(_){}
+}
+
+let APPWRITE_DATABASE_ID = 'tpi_database'; // 默认数据库 ID
+let APPWRITE_COLLECTION_ID = 'daily_records'; // 默认集合 ID
+
+// URL 覆盖并持久化（不改 UI）
+const __dbQS = (__tpi_getQS('db') || '').trim();
+const __colQS = (__tpi_getQS('col') || '').trim();
+if(__dbQS){ APPWRITE_DATABASE_ID = __dbQS; __tpi_setLS('tpi_appwrite_db', __dbQS); }
+if(__colQS){ APPWRITE_COLLECTION_ID = __colQS; __tpi_setLS('tpi_appwrite_col', __colQS); }
+
+// 若 URL 没给，则使用 localStorage 记住的值
+if(!__dbQS){
+  const __dbLS = (__tpi_getLS('tpi_appwrite_db') || '').trim();
+  if(__dbLS) APPWRITE_DATABASE_ID = __dbLS;
+}
+if(!__colQS){
+  const __colLS = (__tpi_getLS('tpi_appwrite_col') || '').trim();
+  if(__colLS) APPWRITE_COLLECTION_ID = __colLS;
+}
 
   // 初始化 Appwrite 客户端
   const client = new Appwrite.Client()
@@ -30361,12 +30391,29 @@ window.__tpi_syncDateToMain = function(){
       console.error('❌ 保存失败:', err);
       let errorMsg = '同步失败';
       if (err.message) {
-        if (err.message.includes('unauthorized') || err.message.includes('Unauthorized')) {
+        const _m = String(err.message || '');
+        if (_m.includes('unauthorized') || _m.includes('Unauthorized')) {
           errorMsg = '权限不足，请重新登录';
-        } else if (err.message.includes('network')) {
+        } else if (_m.toLowerCase().includes('network')) {
           errorMsg = '网络错误，请检查连接';
+        } else if (_m.includes("Database with the requested ID") || _m.includes("could not be found") || _m.includes("Collection with the requested ID")) {
+          // 数据库/集合未创建或 ID 不匹配（客户端无法自动创建）
+          const hint = [
+            'Appwrite 数据库/集合不存在或 ID 不匹配。',
+            `当前代码使用：DatabaseID=${APPWRITE_DATABASE_ID}，CollectionID=${APPWRITE_COLLECTION_ID}`,
+            '修复方法（二选一）：',
+            'A) 去 Appwrite 控制台 → Databases：创建数据库，并把 Database ID 设为上面的值；再创建集合，Collection ID 设为上面的值。',
+            'B) 不改代码：在网址后加 ?db=你的DatabaseID&col=你的CollectionID ，刷新一次后会自动记住。'
+          ].join('
+');
+          try{
+            if (typeof window.showModal === 'function') {
+              window.showModal('⚠️ 云端配置未完成', `<pre style="white-space:pre-wrap; text-align:left;">${hint}</pre>`, '我知道了');
+            }
+          }catch(_){}
+          errorMsg = '云端数据库/集合未配置（已弹出修复说明）';
         } else {
-          errorMsg = err.message;
+          errorMsg = _m;
         }
       }
       if (!__tpi_silent) tpiShowMsg('tpi-sync-msg', `❌ ${errorMsg}`, true);
