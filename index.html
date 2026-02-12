@@ -4737,17 +4737,27 @@ window.exportAsCSV = function() {
     <span style="opacity:.85">提示：同步只影响“当日快照”，不改动你网页的其它功能、布局与规则。</span></p>
   </div>
 
-  <!-- 登录区 (GitHub OAuth) -->
+  <!-- 登录区 -->
   <div id="tpi-auth-panel" style="max-width: 820px;">
-    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:center;">
-      <button type="button" id="githubLoginBtn" style="padding:14px 28px; background: linear-gradient(135deg,#24292e,#1a1e22); color:white; border:none; border-radius:10px; font-weight:600; cursor:pointer; font-size:15px; display:flex; align-items:center; gap:10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); transition: transform 0.2s;" onclick="try{window.tpiLogin&&window.tpiLogin()}catch(e){console.error(e)}">
-        <svg height="24" width="24" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path>
-        </svg>
-        使用 GitHub 登录
-      </button>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+      <div class="form-group" style="min-width:260px; flex:1;">
+        <label for="tpi-username" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">邮箱:</label>
+        <input id="tpi-username" type="text" placeholder="请输入邮箱" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+      </div>
+      <div class="form-group" style="min-width:260px; flex:1;">
+        <label for="tpi-password" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">密码:</label>
+        <input id="tpi-password" type="password" placeholder="请输入密码" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button type="button" onclick="tpiRegister()" style="padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
+          🆕 注册新账号
+        </button>
+        <button type="button" onclick="tpiLogin()" style="padding:12px 20px; background: linear-gradient(135deg,#10b981,#059669); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
+          ✅ 登录
+        </button>
+      </div>
     </div>
-    <div id="tpi-login-msg" style="margin-top:10px; font-size:14px; text-align:center;"></div>
+    <div id="tpi-login-msg" style="margin-top:10px; font-size:14px;"></div>
   </div>
 
   <!-- 已登录区 -->
@@ -26071,35 +26081,6 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(() => {
         ScoreDashboard.update();
     }, 5000);
-  // GitHub 登录按钮事件监听（加固：确保点击一定触发 tpiLogin）
-  const githubBtn = document.getElementById('githubLoginBtn');
-  if (githubBtn) {
-    const _doLogin = function(ev){
-      try{ ev && ev.preventDefault && ev.preventDefault(); }catch(_){}
-      try{ ev && ev.stopPropagation && ev.stopPropagation(); }catch(_){}
-      try{
-        if (typeof window.tpiLogin === 'function') return window.tpiLogin();
-        console.error('❌ tpiLogin 未定义，无法触发 OAuth 跳转');
-      }catch(e){
-        console.error('❌ 调用 tpiLogin 失败:', e);
-      }
-    };
-
-    // 1) inline onclick 之外，再强制赋值 onclick（避免事件被覆盖/丢失）
-    githubBtn.onclick = _doLogin;
-
-    // 2) 额外再加一个 addEventListener（双保险）
-    githubBtn.addEventListener('click', _doLogin, { passive: false });
-
-    // 添加悬停效果
-    githubBtn.addEventListener('mouseenter', function(){
-      this.style.transform = 'translateY(-2px)';
-    });
-    githubBtn.addEventListener('mouseleave', function(){
-      this.style.transform = 'translateY(0)';
-    });
-  }
-
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -30062,41 +30043,11 @@ try{
    - 仍以本页现有 localStorage/collectDailyData/restoreUIFromData 为数据载体
 ========================================================= */
 (function(){
-  // ⚠️ Appwrite 配置（支持“无改代码”覆盖）
-// 1) 默认值：下面四个常量
-// 2) URL 覆盖：在网址后加 ?db=你的DatabaseID&col=你的CollectionID （首次访问会自动记住）
-// 3) 本地记住：localStorage 键 tpi_appwrite_db / tpi_appwrite_col
-const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // Appwrite 端点
-const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 项目 ID
-
-function __tpi_getQS(name){
-  try{ return new URLSearchParams(location.search).get(name) || ''; }catch(_){ return ''; }
-}
-function __tpi_getLS(key){
-  try{ return localStorage.getItem(key) || ''; }catch(_){ return ''; }
-}
-function __tpi_setLS(key, val){
-  try{ localStorage.setItem(key, val); }catch(_){}
-}
-
-let APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // 默认数据库 ID
-let APPWRITE_COLLECTION_ID = 'daily_records'; // 默认集合 ID
-
-// URL 覆盖并持久化（不改 UI）
-const __dbQS = (__tpi_getQS('db') || '').trim();
-const __colQS = (__tpi_getQS('col') || '').trim();
-if(__dbQS){ APPWRITE_DATABASE_ID = __dbQS; __tpi_setLS('tpi_appwrite_db', __dbQS); }
-if(__colQS){ APPWRITE_COLLECTION_ID = __colQS; __tpi_setLS('tpi_appwrite_col', __colQS); }
-
-// 若 URL 没给，则使用 localStorage 记住的值
-if(!__dbQS){
-  const __dbLS = (__tpi_getLS('tpi_appwrite_db') || '').trim();
-  if(__dbLS) APPWRITE_DATABASE_ID = __dbLS;
-}
-if(!__colQS){
-  const __colLS = (__tpi_getLS('tpi_appwrite_col') || '').trim();
-  if(__colLS) APPWRITE_COLLECTION_ID = __colLS;
-}
+  // ⚠️ TODO: 请替换为你的 Appwrite 配置
+  const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
+  const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
+  const APPWRITE_DATABASE_ID = 'tpi_database'; // 数据库 ID
+  const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
 
   // 初始化 Appwrite 客户端
   const client = new Appwrite.Client()
@@ -30106,14 +30057,7 @@ if(!__colQS){
   const account = new Appwrite.Account(client);
   const databases = new Appwrite.Databases(client);
 
-  
-  // 暴露到全局，便于调试（不影响现有逻辑）
-  window.__tpi_appwrite = window.__tpi_appwrite || {};
-  window.__tpi_appwrite.client = client;
-  window.__tpi_appwrite.account = account;
-  window.__tpi_appwrite.databases = databases;
-
-// --------- storage helpers (use existing safe wrappers if present) ----------
+  // --------- storage helpers (use existing safe wrappers if present) ----------
   const lsGet = (k, d) => (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
   const lsSet = (k, v) => (typeof window.__tpi_ls_set === 'function') ? window.__tpi_ls_set(k, v) : (localStorage.setItem(k, v), true);
   const lsRemove = (k) => (typeof window.__tpi_ls_remove === 'function') ? window.__tpi_ls_remove(k) : (localStorage.removeItem(k), true);
@@ -30258,330 +30202,93 @@ window.__tpi_syncDateToMain = function(){
     setAutoBackupEnabled(enabled);
   }
 
-// ---------------- public functions (GitHub OAuth) ----------------
-  // GitHub OAuth 登录函数
-  window.tpiLogin = function(){
+// ---------------- public functions ----------------
+  window.tpiRegister = async function(){
+    const username = (document.getElementById('tpi-username')?.value || '').trim();
+    const password = (document.getElementById('tpi-password')?.value || '');
+    if (!username || !password) { tpiShowMsg('tpi-login-msg', '❌ 邮箱和密码不能为空', true); return; }
+    if (password.length < 6) { tpiShowMsg('tpi-login-msg', '❌ 密码至少 6 位', true); return; }
+
+    // 验证邮箱格式
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(username)) {
+      tpiShowMsg('tpi-login-msg', '❌ 请输入有效的邮箱地址', true);
+      return;
+    }
+
+    tpiShowMsg('tpi-login-msg', '⏳ 正在注册...');
     try{
-      const now = Date.now();
-
-      // 防抖/解锁：避免重复点击或上次流程异常导致“永远无反应”
-      if (window.__tpi_oauth_inflight) {
-        const last = window.__tpi_last_login_click || 0;
-        // 超过 10 秒仍未跳转/未回调，认为卡死，自动解锁
-        if (now - last > 10000) {
-          window.__tpi_oauth_inflight = false;
-        } else {
-          tpiShowMsg('tpi-login-msg', '⏳ 已在跳转授权流程中，请稍候…（如长时间无变化可刷新重试）', false);
-          return;
-        }
-      }
-      window.__tpi_oauth_inflight = true;
-      window.__tpi_last_login_click = now;
-
-      tpiShowMsg('tpi-login-msg', '⏳ 正在跳转到 GitHub 进行授权...', false);
-
-      // 以全局暴露对象为准，避免作用域/重复注入导致 account 不可见
-      const acct = (window.__tpi_appwrite && window.__tpi_appwrite.account) || (typeof account !== 'undefined' ? account : null);
-
-      if (!window.Appwrite || !acct || !acct.createOAuth2Session) {
-        window.__tpi_oauth_inflight = false;
-        console.error('❌ Appwrite Account 未就绪，无法发起 OAuth');
-        tpiShowMsg('tpi-login-msg', '❌ 登录组件未就绪（account 未初始化）', true);
-        return;
-      }
-
-      // 关键：不要 await，保持“用户手势”上下文，避免部分浏览器偶发阻止跳转
-      acct.createOAuth2Session(
-        'github',
-        'https://xiaoyi1986811.github.io/tpi-appwrite-web/',
-        'https://xiaoyi1986811.github.io/tpi-appwrite-web/'
+      // 生成唯一的用户 ID
+      const userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      
+      // 调用 Appwrite 注册 API
+      const response = await account.create(
+        userId,
+        username,
+        password,
+        'TPI User'
       );
-
-      // 注意：此处通常不会执行（会跳转到 GitHub）
-      // 如果未跳转，短延时后释放 inflight，避免卡死
-      setTimeout(() => { window.__tpi_oauth_inflight = false; }, 1500);
+      
+      console.log('✅ 注册成功:', response);
+      tpiShowMsg('tpi-login-msg', '✅ 注册成功，请直接点击"登录"', false);
     }catch(err){
-      window.__tpi_oauth_inflight = false;
-      console.error('❌ GitHub 登录失败:', err);
-      try{ tpiShowMsg('tpi-login-msg', `❌ 登录失败: ${err && err.message ? err.message : err}`, true); }catch(_){}
-    }
-  };
-
-  // 移除注册函数（GitHub OAuth 不需要单独注册）
-  window.tpiRegister = function(){
-    tpiShowMsg('tpi-login-msg', '💡 使用 GitHub 登录即可自动注册账号', false);
-  };
-
-  window.tpiLogout = async function(){
-    try{
-      // 删除当前会话
-      await account.deleteSession('current');
-    }catch(e){
-      console.warn('退出登录时出错:', e);
-    }
-    
-    // 清空会话
-    TPI_CURRENT_USER = null;
-    TPI_CURRENT_PASSWORD = null;
-
-    // 清除 token（用户名仍保留，方便下次输入）
-    lsRemove(KEY_TOKEN);
-
-    setLoggedOutUI();
-    tpiShowMsg('tpi-login-msg', '已退出登录', false);
-  };
-
-  window.tpiSaveToday = async function(opts){
-    const auth = requireLogin(); if (!auth) return;
-
-    // opts: {date, silent, auto} 或直接传入 'YYYY-MM-DD'
-    const __tpi_opts = (opts && typeof opts === 'object') ? opts : {};
-    const __tpi_silent = (opts === true) || (__tpi_opts && __tpi_opts.silent) || false;
-    const __tpi_date = (typeof opts === 'string') ? opts : (__tpi_opts.date || getSyncDate());
-
-    // 上传前尽量把"弹窗草稿/规则生成内容"刷到快照里（不改 DOM 结构）
-    try{ if (typeof window.__tpi_flushRadarDraft === 'function') window.__tpi_flushRadarDraft(); }catch(e){}
-    try{ if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc(); }catch(e){}
-
-    const date = __tpi_date || getSyncDate();
-
-    // ⭐⭐⭐ 关键：保存整个 localStorage 状态（全量同步）
-    const fullState = {};
-    try{
-      const n = (typeof window.__tpi_ls_length === 'function') ? window.__tpi_ls_length(0) : localStorage.length;
-      for (let i = 0; i < n; i++){
-        const key = (typeof window.__tpi_ls_key === 'function') ? window.__tpi_ls_key(i, null) : localStorage.key(i);
-        if (!key) continue;
-        fullState[key] = lsGet(key, null);
-      }
-    }catch(e){
-      console.warn('[tpiSaveToday] 读取 localStorage 失败:', e);
-    }
-
-    // 以 UI 当前选择日期为准写入（让后端可按日检索）
-    fullState['date-input'] = date;
-
-    if (!__tpi_silent) tpiShowMsg('tpi-sync-msg', '⏳ 正在同步到云端...');
-    try{
-      // 构建文档数据
-      const documentData = {
-        date: date,
-        data: fullState
-      };
-
-      // 使用 date 作为文档 ID（去除非法字符）
-      const docId = date.replace(/[^a-zA-Z0-9_-]/g, '_');
-
-      let result;
-      try {
-        // 先尝试更新现有文档
-        result = await databases.updateDocument(
-          APPWRITE_DATABASE_ID,
-          APPWRITE_COLLECTION_ID,
-          docId,
-          documentData
-        );
-        console.log('✅ 更新文档成功:', result);
-      } catch (updateError) {
-        // 如果文档不存在，则创建新文档
-        if (updateError.code === 404 || updateError.message.includes('not found')) {
-          result = await databases.createDocument(
-            APPWRITE_DATABASE_ID,
-            APPWRITE_COLLECTION_ID,
-            docId,
-            documentData
-          );
-          console.log('✅ 创建文档成功:', result);
-        } else {
-          throw updateError;
-        }
-      }
-
-      if (!__tpi_silent) tpiShowMsg('tpi-sync-msg', '✅ 数据已同步到云端！', false);
-    }catch(err){
-      console.error('❌ 保存失败:', err);
-      let errorMsg = '同步失败';
+      console.error('❌ 注册失败:', err);
+      let errorMsg = '注册失败';
       if (err.message) {
-        const _m = String(err.message || '');
-        if (_m.includes('unauthorized') || _m.includes('Unauthorized')) {
-          errorMsg = '权限不足，请重新登录';
-        } else if (_m.toLowerCase().includes('network')) {
-          errorMsg = '网络错误，请检查连接';
-        } else if (_m.includes("Database with the requested ID") || _m.includes("could not be found") || _m.includes("Collection with the requested ID")) {
-          // 数据库/集合未创建或 ID 不匹配（客户端无法自动创建）
-          const hint = [
-            'Appwrite 数据库/集合不存在或 ID 不匹配。',
-            `当前代码使用：DatabaseID=${APPWRITE_DATABASE_ID}，CollectionID=${APPWRITE_COLLECTION_ID}`,
-            '修复方法（二选一）：',
-            'A) 去 Appwrite 控制台 → Databases：创建数据库，并把 Database ID 设为上面的值；再创建集合，Collection ID 设为上面的值。',
-            'B) 不改代码：在网址后加 ?db=你的DatabaseID&col=你的CollectionID ，刷新一次后会自动记住。'
-          ].join('
-');
-          try{
-            if (typeof window.showModal === 'function') {
-              window.showModal('⚠️ 云端配置未完成', `<pre style="white-space:pre-wrap; text-align:left;">${hint}</pre>`, '我知道了');
-            }
-          }catch(_){}
-          errorMsg = '云端数据库/集合未配置（已弹出修复说明）';
+        if (err.message.includes('user_already_exists') || err.message.includes('already exists')) {
+          errorMsg = '该邮箱已被注册，请直接登录';
+        } else if (err.message.includes('Invalid email')) {
+          errorMsg = '邮箱格式无效';
         } else {
-          errorMsg = _m;
+          errorMsg = err.message;
         }
       }
-      if (!__tpi_silent) tpiShowMsg('tpi-sync-msg', `❌ ${errorMsg}`, true);
-      else { try{ console.warn('[AutoBackup] 同步失败:', errorMsg); }catch(e){} }
+      tpiShowMsg('tpi-login-msg', `❌ ${errorMsg}`, true);
     }
   };
 
-  window.tpiLoadToday = async function(opts){
-    const auth = requireLogin(); if (!auth) return;
-    const __tpi_opts = (opts && typeof opts === 'object') ? opts : {};
-    const date = (typeof opts === 'string') ? opts : (__tpi_opts.date || getSyncDate());
+  window.tpiLogin = async function(){
+    const username = (document.getElementById('tpi-username')?.value || '').trim();
+    const password = (document.getElementById('tpi-password')?.value || '');
+    if (!username || !password) { tpiShowMsg('tpi-login-msg', '❌ 邮箱和密码不能为空', true); return; }
 
-    tpiShowMsg('tpi-sync-msg', '⏳ 正在从云端下载...');
+    tpiShowMsg('tpi-login-msg', '⏳ 正在登录...');
     try{
-      // 使用 date 作为文档 ID
-      const docId = date.replace(/[^a-zA-Z0-9_-]/g, '_');
+      // 调用 Appwrite 登录 API（创建邮箱会话）
+      const session = await account.createEmailSession(username, password);
+      console.log('✅ 登录成功:', session);
+
+      // 获取用户信息
+      const user = await account.get();
       
-      // 获取文档
-      const document = await databases.getDocument(
-        APPWRITE_DATABASE_ID,
-        APPWRITE_COLLECTION_ID,
-        docId
-      );
+      // 记录当前会话
+      TPI_CURRENT_USER = user.$id;
+      TPI_CURRENT_PASSWORD = password;
 
-      console.log('✅ 加载文档成功:', document);
+      // 缓存用户邮箱
+      lsSet(KEY_USER, username);
 
-      // 数据字段兼容
-      const payload = (document && document.data) || null;
+      tpiShowMsg('tpi-login-msg', '✅ 登录成功', false);
+      // 登录后清空密码输入框（UI 隐藏，避免误泄露）
+      try{ const pw = document.getElementById('tpi-password'); if (pw) pw.value = ''; }catch(e){}
+      setLoggedInUI(username);
 
-      if (!payload || typeof payload !== 'object') {
-        tpiShowMsg('tpi-sync-msg', `ℹ️ 云端无 ${date} 的数据`, false);
-        return;
-      }
-
-      // ⭐⭐⭐ 关键：恢复整个 localStorage 状态（全量覆盖）
-      // 为避免把"当前会话"也抹掉，先备份必要字段（随后会补回）
-      const keepUser = auth.user;
-
-      try{
-        if (typeof window.__tpi_ls_clear === 'function') window.__tpi_ls_clear();
-        else localStorage.clear();
-      }catch(e){
-        console.warn('[tpiLoadToday] localStorage.clear 失败:', e);
-      }
-
-      try{
-        for (const [k, v] of Object.entries(payload)){
-          // value 统一写字符串（localStorage 只接受 string）
-          lsSet(k, (v === null || v === undefined) ? '' : String(v));
-        }
-      }catch(e){
-        console.warn('[tpiLoadToday] 写回 localStorage 失败:', e);
-      }
-
-      // 补回会话/用户名（以防云端没保存这些键）
-      try{ lsSet(KEY_USER, keepUser); }catch(e){}
-      TPI_CURRENT_USER = TPI_CURRENT_USER; // 保持当前用户ID
-      
-      tpiShowMsg('tpi-sync-msg', '✅ 数据已加载，即将刷新页面...', false);
-
-      // 刷新确保所有模块都按"真实 localStorage 状态"重新初始化（最小改动、最稳）
-      setTimeout(()=>{ try{ location.reload(); }catch(e){} }, 500);
+      // 登录后自动加载今日
+      setTimeout(()=>{ try{ window.tpiLoadToday(); }catch(e){} }, 50);
     }catch(err){
-      console.error('❌ 加载失败:', err);
-      
-      // 404 表示该日期没有记录
-      if (err.code === 404 || err.message.includes('not found')) {
-        tpiShowMsg('tpi-sync-msg', `ℹ️ 云端无 ${date} 的数据`, false);
-      } else {
-        let errorMsg = '加载失败';
-        if (err.message) {
-          if (err.message.includes('unauthorized') || err.message.includes('Unauthorized')) {
-            errorMsg = '权限不足，请重新登录';
-          } else if (err.message.includes('network')) {
-            errorMsg = '网络错误，请检查连接';
-          } else {
-            errorMsg = err.message;
-          }
-        }
-        tpiShowMsg('tpi-sync-msg', `❌ ${errorMsg}`, true);
-      }
-    }
-  };
-
-
-
-  // 兼容/进阶：支持传入任意日期进行同步（历史日期同步）
-  window.tpiSaveData = function(date){ return window.tpiSaveToday(date); };
-  window.tpiLoadData = function(date){ return window.tpiLoadToday(date); };
-
-  // 命名增强：明确"今日/所选日期"
-  window.tpiLoadTodayData = window.tpiLoadToday;
-  window.tpiSaveTodayData = window.tpiSaveToday;
-
-  // 兼容：导出与备份模块如果仍在调用旧入口，把它们映射到后端
-  try{
-    if (window.__tpi_legacy_saveTpiData_1) window.__tpi_legacy_saveTpiData_1 = window.tpiSaveToday;
-    if (window.__tpi_legacy_loadTpiData_1) window.__tpi_legacy_loadTpiData_1 = window.tpiLoadToday;
-  }catch(e){}
-
-  // 页面加载：检查是否有活动会话
-  window.addEventListener('DOMContentLoaded', async () => {
-    try{
-      // 初始化：同步日期选择器 + 自动备份开关
-      try{ syncMainDateToSyncUI(); }catch(e){}
-      try{ const di=getSyncDateInput(); if(di){ di.addEventListener('change', ()=>{ window.__tpi_syncDateToMain(); }); } }catch(e){}
-      try{ initAutoBackupUI(); }catch(e){}
-      
-      const savedUser = lsGet(KEY_USER, '');
-      if (savedUser && document.getElementById('tpi-username')) {
-        document.getElementById('tpi-username').value = savedUser;
-      }
-
-      // 尝试获取当前用户（检查是否有活动会话）
-      try {
-        const user = await account.get();
-        if (user && user.$id) {
-          console.log('✅ 检测到活动会话:', user.email);
-          TPI_CURRENT_USER = user.$id;
-          setLoggedInUI(user.email || savedUser);
+      console.error('❌ 登录失败:', err);
+      let errorMsg = '登录失败';
+      if (err.message) {
+        if (err.message.includes('Invalid credentials') || err.message.includes('user_invalid_credentials')) {
+          errorMsg = '邮箱或密码错误';
+        } else if (err.message.includes('user_blocked')) {
+          errorMsg = '账户已被禁用';
         } else {
-          setLoggedOutUI();
+          errorMsg = err.message;
         }
-      } catch (e) {
-        // 没有活动会话
-        console.log('ℹ️ 未检测到活动会话');
-        setLoggedOutUI();
       }
-    }catch(e){
-      console.error('初始化错误:', e);
-      setLoggedOutUI();
+      tpiShowMsg('tpi-login-msg', `❌ ${errorMsg}`, true);
     }
-  });
-})();
-</script>
-
-
-<!-- =========================================================
-     Appwrite Prompt Patch (Strict-Flow Implementation)
-     - Adds "auth-section/main-section/login-form/register-form" compatibility
-     - Implements the exact 5-step flow from the user's prompt
-========================================================= -->
-
-<!-- [FIX] removed duplicate Appwrite init/script block to prevent redeclaration -->
-: (base + '/');
-      })()
-    );
-// 注意：此处代码不会执行，因为会跳转到 GitHub
-    }catch(err){
-      console.error('❌ GitHub 登录失败:', err);
-      tpiShowMsg('tpi-login-msg', `❌ 登录失败: ${err.message}`, true);
-    }
-  };
-
-  // 移除注册函数（GitHub OAuth 不需要单独注册）
-  window.tpiRegister = function(){
-    tpiShowMsg('tpi-login-msg', '💡 使用 GitHub 登录即可自动注册账号', false);
   };
 
   window.tpiLogout = async function(){
@@ -30822,9 +30529,365 @@ window.__tpi_syncDateToMain = function(){
      - Adds "auth-section/main-section/login-form/register-form" compatibility
      - Implements the exact 5-step flow from the user's prompt
 ========================================================= -->
+<script>
+/* ===========================
+   第二步：替换/补充配置区（在 <script> 开头）
+   （此补丁在页面末尾执行，但提供同等可执行配置区与初始化逻辑）
+=========================== */
 
-<!-- [FIX] removed another duplicate Appwrite init/script block to prevent redeclaration -->
+// --- Appwrite 配置区 (请务必修改!) ---
+const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 通常是这个地址
+const APPWRITE_PROJECT_ID = '698d998e003c903490e1';       // ←←← 必须替换成你自己的 Project ID!
+// --- 配置区结束 ---
 
+// 初始化 Appwrite 客户端
+const client = new Appwrite.Client()
+    .setEndpoint(APPWRITE_ENDPOINT)
+    .setProject(APPWRITE_PROJECT_ID);
+
+const account = new Appwrite.Account(client);
+const databases = new Appwrite.Databases(client);
+
+// 数据库和集合 ID (需与你在 Appwrite 控制台创建的一致)
+const DATABASE_ID = 'tpi_database';
+const COLLECTION_ID = 'daily_records';
+
+
+/* ===========================
+   工具：确保提示词中用到的 DOM 节点存在
+=========================== */
+function __ensureEl(id, createTag, parent){
+  let el = document.getElementById(id);
+  if (el) return el;
+  el = document.createElement(createTag || 'div');
+  el.id = id;
+  (parent || document.body).appendChild(el);
+  return el;
+}
+
+function __ensureInput(id, type, parent){
+  let el = document.getElementById(id);
+  if (el) return el;
+  el = document.createElement('input');
+  el.id = id;
+  el.type = type || 'text';
+  (parent || document.body).appendChild(el);
+  return el;
+}
+
+function __ensureButton(id, text, parent){
+  let el = document.getElementById(id);
+  if (el) return el;
+  el = document.createElement('button');
+  el.id = id;
+  el.type = 'button';
+  el.textContent = text || id;
+  el.style.display = 'none'; // 默认不改变你现有 UI
+  (parent || document.body).appendChild(el);
+  return el;
+}
+
+function __wireValue(fromId, toId){
+  const from = document.getElementById(fromId);
+  const to = document.getElementById(toId);
+  if (!from || !to) return;
+  // 同步初值
+  try{ to.value = from.value || ''; }catch(e){}
+  // 双向同步
+  const sync = () => { try{ to.value = from.value || ''; }catch(e){} };
+  from.addEventListener('input', sync);
+  from.addEventListener('change', sync);
+}
+
+
+/* ===========================
+   第三步：实现登录/注册功能（绑定表单事件）
+=========================== */
+function __setupAuthForms(){
+  // 兼容提示词的 auth-section/main-section
+  const authSection = __ensureEl('auth-section', 'div', document.body);
+  const mainSection = __ensureEl('main-section', 'div', document.body);
+
+  // 若页面已有你自己的登录区/主界面区，则这里不改布局，只做可用性兜底
+  // auth-section/main-section 默认不强制显示/隐藏，由 loadMainInterface 决定
+
+  // 创建提示词要求的表单结构（隐藏，不破坏现有UI）
+  const loginForm = __ensureEl('login-form', 'form', authSection);
+  const regForm = __ensureEl('register-form', 'form', authSection);
+
+  // 登录字段
+  const loginEmail = __ensureInput('login-email', 'email', loginForm);
+  const loginPwd = __ensureInput('login-password', 'password', loginForm);
+
+  // 注册字段
+  const regEmail = __ensureInput('register-email', 'email', regForm);
+  const regPwd = __ensureInput('register-password', 'password', regForm);
+
+  // 如果页面已有 tpi-username / tpi-password，则把它们同步到提示词的字段
+  if (document.getElementById('tpi-username')) __wireValue('tpi-username', 'login-email');
+  if (document.getElementById('tpi-password')) __wireValue('tpi-password', 'login-password');
+  if (document.getElementById('tpi-username')) __wireValue('tpi-username', 'register-email');
+  if (document.getElementById('tpi-password')) __wireValue('tpi-password', 'register-password');
+
+  // 处理登录表单提交
+  document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault(); // 阻止页面刷新
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+
+      try {
+          // 调用 Appwrite 登录 API
+          await account.createEmailSession(email, password);
+          alert('登录成功！');
+          loadMainInterface(); // 加载主界面
+      } catch (error) {
+          console.error('登录失败:', error);
+          alert('登录失败: ' + (error.message || '未知错误'));
+      }
+  });
+
+  // 处理注册表单提交
+  document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('register-email').value;
+      const password = document.getElementById('register-password').value;
+
+      try {
+          // 调用 Appwrite 注册 API
+          await account.create('unique()', email, password, email);
+          alert('注册成功！请登录。');
+          // 切换回登录标签页
+          const tab = document.getElementById('btn-login-tab');
+          if (tab) tab.click();
+      } catch (error) {
+          console.error('注册失败:', error);
+          alert('注册失败: ' + (error.message || '未知错误'));
+      }
+  });
+
+  // 兼容提示词中的“tab按钮”（若不存在则创建隐藏节点）
+  __ensureButton('btn-login-tab', 'Login', authSection);
+
+  // 兼容提示词中的“保存到云端/退出登录”按钮（若你已有同名按钮则不创建）
+  __ensureButton('save-to-cloud-btn', '保存到云端', mainSection);
+  __ensureButton('logout-btn', '退出登录', mainSection);
+
+  // 兼容提示词中的 current-date
+  const cd = __ensureEl('current-date', 'span', mainSection);
+  cd.style.display = 'none'; // 不改变现有UI
+}
+
+__setupAuthForms();
+
+
+/* ===========================
+   第四步：实现主界面加载与数据同步
+=========================== */
+
+// 获取今天的日期字符串 (YYYY-MM-DD)
+function getTodayString() {
+    return new Date().toISOString().split('T')[0];
+}
+
+// 加载主界面 (隐藏登录框，显示TPI表单)
+function loadMainInterface() {
+    // 提示词指定的区域
+    const auth = document.getElementById('auth-section');
+    const main = document.getElementById('main-section');
+    if (auth) auth.style.display = 'none';
+    if (main) main.style.display = 'block';
+    const cd = document.getElementById('current-date');
+    if (cd) cd.textContent = getTodayString();
+
+    // 同步到你现有的 UI（如果存在）
+    try{
+      if (typeof window.setLoggedInUI === 'function') {
+        // 如果你页面已有“tpi-username”输入框，则用它做显示名
+        const email = (document.getElementById('tpi-username') && document.getElementById('tpi-username').value) ? document.getElementById('tpi-username').value : '';
+        window.setLoggedInUI(email);
+      } else {
+        // 兜底：如果你页面是 tpi-auth-panel / tpi-sync-panel
+        const ap = document.getElementById('tpi-auth-panel');
+        const sp = document.getElementById('tpi-sync-panel');
+        if (ap) ap.style.display = 'none';
+        if (sp) sp.style.display = '';
+      }
+    }catch(e){}
+
+    // 自动加载今日数据
+    loadTodaysData();
+}
+
+// 从 Appwrite 加载今日的 TPI 数据
+async function loadTodaysData() {
+    const today = getTodayString();
+    try {
+        const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+            Appwrite.Query.equal('date', today),
+            Appwrite.Query.limit(1)
+        ]);
+
+        if (response.documents.length > 0) {
+            const savedData = response.documents[0].data;
+
+            // 提示词要求：把 savedData 映射回表单。
+            // 为了保证“全站输入/勾选/规则生成内容”100%恢复，这里采用整包快照恢复：
+            try{
+              if (savedData && savedData.data && typeof window.restoreUIFromData === 'function') {
+                window.restoreUIFromData(savedData.data);
+              }
+            }catch(e){ console.warn('restoreUIFromData failed:', e); }
+
+            console.log('已加载今日数据:', savedData);
+        }
+    } catch (error) {
+        console.warn('加载今日数据失败或无数据:', error);
+    }
+}
+
+// 将当前表单数据保存到 Appwrite
+async function saveTodaysData() {
+    const today = getTodayString();
+
+    // 👇👇👇 提示词要求：收集表单数据 👇👇👇
+    // 为了完整性：使用你页面现有 collectDailyData 抓取“整站快照”
+    let snapshot = null;
+    try{
+      if (typeof window.collectDailyData === 'function') {
+        const obj = window.collectDailyData();
+        snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+      }
+    }catch(e){ console.warn('collectDailyData failed:', e); }
+
+    // 构建要保存的数据对象（保留提示词字段名 date + 你全量快照 data）
+    const dataToSave = {
+        date: today,
+        data: snapshot || {}
+    };
+
+    try {
+        // 检查今天的数据是否存在
+        const existingDocs = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+            Appwrite.Query.equal('date', today),
+            Appwrite.Query.limit(1)
+        ]);
+
+        if (existingDocs.documents.length > 0) {
+            // 如果存在，更新它
+            await databases.updateDocument(
+                DATABASE_ID,
+                COLLECTION_ID,
+                existingDocs.documents[0].$id,
+                dataToSave
+            );
+        } else {
+            // 如果不存在，创建新文档
+            // 注意：权限建议在 Appwrite 控制台的 Collection 里配置为“仅登录用户可读写”
+            await databases.createDocument(
+                DATABASE_ID,
+                COLLECTION_ID,
+                today, // 使用日期作为文档ID，保证每天一条
+                dataToSave
+            );
+        }
+        alert('✅ 数据已成功保存到云端！');
+    } catch (error) {
+        console.error('保存失败:', error);
+        alert('❌ 保存失败: ' + (error.message || '未知错误'));
+    }
+}
+
+// 绑定“保存到云端”按钮
+document.getElementById('save-to-cloud-btn').addEventListener('click', saveTodaysData);
+
+// 绑定“退出登录”按钮
+document.getElementById('logout-btn').addEventListener('click', async () => {
+    try {
+        await account.deleteSession('current');
+        alert('已退出登录');
+        location.reload(); // 刷新页面回到登录状态
+    } catch (error) {
+        console.error('退出失败:', error);
+        alert('退出失败');
+    }
+});
+
+
+/* ===========================
+   第五步：实现页面初始化（检查登录状态）
+=========================== */
+(async () => {
+    try {
+        // 尝试获取当前用户信息
+        const user = await account.get();
+        console.log('用户已登录:', user);
+        loadMainInterface();
+    } catch (error) {
+        // 如果获取失败，说明未登录或会话过期
+        console.log('用户未登录');
+        const auth = document.getElementById('auth-section');
+        const main = document.getElementById('main-section');
+        if (auth) auth.style.display = 'block';
+        if (main) main.style.display = 'none';
+
+        // 同步到你现有的 UI（如果存在）
+        try{
+          if (typeof window.setLoggedOutUI === 'function') window.setLoggedOutUI();
+          else {
+            const ap = document.getElementById('tpi-auth-panel');
+            const sp = document.getElementById('tpi-sync-panel');
+            if (ap) ap.style.display = '';
+            if (sp) sp.style.display = 'none';
+          }
+        }catch(e){}
+    }
+})();
+
+
+// ========== Appwrite 集成区 (请在此处粘贴) ==========
+
+// 1. 初始化客户端 (替换为你的真实ID)
+const client = new Appwrite.Client()
+  .setEndpoint('https://sgp.cloud.appwrite.io/v1')
+  .setProject('698d998e003c903490e1'); // ← 必须替换!
+
+const account = new Appwrite.Account(client);
+const databases = new Appwrite.Databases(client);
+const DB_ID = 'tpi_database';
+const COL_ID = 'daily_records';
+
+// 2. 页面加载时检查登录状态
+window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await account.get(); // 尝试获取当前用户
+    showMainInterface();
+  } catch {
+    showAuthInterface();
+  }
+});
+
+// 3. 绑定登录/注册事件
+document.getElementById('login-btn')?.addEventListener('click', handleLogin);
+document.getElementById('register-btn')?.addEventListener('click', handleRegister);
+document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
+
+// 4. 绑定保存事件
+document.getElementById('save-to-cloud-btn')?.addEventListener('click', saveTodaysData);
+
+// 5. 实现核心函数 (此处省略具体实现，但需包含 create/update document 逻辑)
+async function handleLogin() { /* ... */ }
+async function handleRegister() { /* ... */ }
+async function handleLogout() { /* ... */ }
+async function saveTodaysData() { 
+  // 关键：遍历所有输入框，构建 data 对象
+  // 调用 databases.createDocument 或 updateDocument
+}
+function showMainInterface() { /* 切换显示主界面 */ }
+function showAuthInterface() { /* 切换显示登录界面 */ }
+
+// ========== Appwrite 集成区结束 ==========
+
+</script>
 
 </body>
 </html>
