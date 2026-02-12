@@ -30262,17 +30262,28 @@ window.__tpi_syncDateToMain = function(){
   // GitHub OAuth 登录函数
   window.tpiLogin = function(){
     try{
-      // 防抖：避免重复点击导致浏览器/SDK 行为异常
+      const now = Date.now();
+
+      // 防抖/解锁：避免重复点击或上次流程异常导致“永远无反应”
       if (window.__tpi_oauth_inflight) {
-        tpiShowMsg('tpi-login-msg', '⏳ 已在跳转授权流程中，请稍候...', false);
-        return;
+        const last = window.__tpi_last_login_click || 0;
+        // 超过 10 秒仍未跳转/未回调，认为卡死，自动解锁
+        if (now - last > 10000) {
+          window.__tpi_oauth_inflight = false;
+        } else {
+          tpiShowMsg('tpi-login-msg', '⏳ 已在跳转授权流程中，请稍候…（如长时间无变化可刷新重试）', false);
+          return;
+        }
       }
       window.__tpi_oauth_inflight = true;
-      window.__tpi_last_login_click = Date.now();
+      window.__tpi_last_login_click = now;
 
       tpiShowMsg('tpi-login-msg', '⏳ 正在跳转到 GitHub 进行授权...', false);
 
-      if (!window.Appwrite || !account || !account.createOAuth2Session) {
+      // 以全局暴露对象为准，避免作用域/重复注入导致 account 不可见
+      const acct = (window.__tpi_appwrite && window.__tpi_appwrite.account) || (typeof account !== 'undefined' ? account : null);
+
+      if (!window.Appwrite || !acct || !acct.createOAuth2Session) {
         window.__tpi_oauth_inflight = false;
         console.error('❌ Appwrite Account 未就绪，无法发起 OAuth');
         tpiShowMsg('tpi-login-msg', '❌ 登录组件未就绪（account 未初始化）', true);
@@ -30280,14 +30291,14 @@ window.__tpi_syncDateToMain = function(){
       }
 
       // 关键：不要 await，保持“用户手势”上下文，避免部分浏览器偶发阻止跳转
-      account.createOAuth2Session(
+      acct.createOAuth2Session(
         'github',
         'https://xiaoyi1986811.github.io/tpi-appwrite-web/',
         'https://xiaoyi1986811.github.io/tpi-appwrite-web/'
       );
 
       // 注意：此处通常不会执行（会跳转到 GitHub）
-      // 如果未跳转，释放 inflight 标记，避免卡死
+      // 如果未跳转，短延时后释放 inflight，避免卡死
       setTimeout(() => { window.__tpi_oauth_inflight = false; }, 1500);
     }catch(err){
       window.__tpi_oauth_inflight = false;
