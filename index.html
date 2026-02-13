@@ -19693,14 +19693,14 @@ ${reflection}
                 if (!dateInput) return;
                 
                 // 【关键修复】页面加载时强制设置为今天的日期
-                const setToday = () => {
+                                    const setToday = () => {
                     const today = new Date();
                     const yyyy = today.getFullYear();
                     const mm = String(today.getMonth() + 1).padStart(2, '0');
                     const dd = String(today.getDate()).padStart(2, '0');
                     dateInput.value = `${yyyy}-${mm}-${dd}`;
                     console.log('✅ 日期已设置为今天:', dateInput.value);
-                };
+                    };
                 
                 // 无论如何都先设置为今天
                 setToday();
@@ -19772,7 +19772,11 @@ ${reflection}
                     });
                 }
 
-                dateInput.addEventListener('change', updateWeekday);
+                dateInput.addEventListener('change', () => {
+                    updateWeekday();
+                    const _syncDateEl = document.getElementById('syncDateInput');
+                    if (_syncDateEl) _syncDateEl.value = dateInput.value;
+                });
                 updateWeekday();
             }
 
@@ -30872,10 +30876,15 @@ function __tpi_isoToSlash(s){
   const iso = __tpi_normDateAnyToISO(s);
   return iso.replace(/-/g,'/');
 }
-function __tpi_getSyncDateISO(){
-  const el = document.getElementById('syncDateInput');
-  const raw = el ? el.value : '';
-  return __tpi_normDateAnyToISO(raw);
+function __tpi_getSyncDateISO() {
+  const syncDateInput = document.getElementById('syncDateInput');
+  const mainDateInput = document.getElementById('date-input');
+  let raw = (syncDateInput && syncDateInput.value) ? syncDateInput.value : '';
+  if (!raw && mainDateInput && mainDateInput.value) raw = mainDateInput.value;
+  if (!raw) raw = new Date().toISOString().slice(0, 10);
+  const iso = __tpi_normDateAnyToISO(raw);
+  if (syncDateInput && !syncDateInput.value) syncDateInput.value = iso;
+  return iso;
 }
 function __tpi_setMainDateFromISO(iso){
   try{
