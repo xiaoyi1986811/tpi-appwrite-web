@@ -30941,12 +30941,26 @@ async function tpiSaveToday(){
     const userId = user && user.$id ? user.$id : '';
     if(!userId) throw new Error('no userId');
 
+    // collectDailyData returns { [date]: data }, we need to extract just the data
     const snapshotObj = __tpi_getDailySnapshotObject();
+    let actualData = snapshotObj;
+    
+    // Extract the data if it's wrapped in a date key
+    if(snapshotObj && typeof snapshotObj === 'object'){
+      const dateKeys = Object.keys(snapshotObj);
+      if(dateKeys.length === 1 && dateKeys[0].match(/^\d{4}[-\/]\d{2}[-\/]\d{2}$/)){
+        actualData = snapshotObj[dateKeys[0]];
+        console.log('📦 [上传] 提取日期包裹的数据:', dateKeys[0]);
+      }
+    }
+    
     // 确保 data 是字符串（你的表里 data=longtext）
-    const dataStr = JSON.stringify(snapshotObj);
+    const dataStr = JSON.stringify(actualData);
 
     const docId = __tpi_docId(userId, dateISO);
     const payload = { userId, date: dateISO, data: dataStr };
+
+    console.log('📤 [上传] 准备上传数据:', { dateISO, dataSize: dataStr.length, hasFormState: !!(actualData && actualData._formState) });
 
     // 给当前用户读写权限（单账号也没问题）
     const perms = [
@@ -30957,23 +30971,25 @@ async function tpiSaveToday(){
 
     try{
       await databases.createDocument(DB_ID, COL_ID, docId, payload, perms);
+      console.log('✅ [上传] 创建新文档成功');
     }catch(e){
       // 已存在则更新
       if(e && (e.code === 409 || e.type === 'document_already_exists' || String(e.message||'').includes('already exists'))){
         await databases.updateDocument(DB_ID, COL_ID, docId, payload, perms);
+        console.log('✅ [上传] 更新已有文档成功');
       }else{
         throw e;
       }
     }
 
     if(typeof window.showModal === 'function'){
-      window.showModal({ type:'success', title:'同步成功', message:`✅ 已上传：${dateISO}`, confirmText:'好的' });
+      window.showModal({ type:'success', title:'上传成功', message:`✅ 已成功上传 ${dateISO} 的数据到云端\n数据大小: ${(dataStr.length/1024).toFixed(2)} KB`, confirmText:'好的' });
     }
   }catch(e){
     const msg = (e && (e.message || e.response || e)) ? String(e.message || e) : '未知错误';
-    console.error('上传失败', e);
+    console.error('❌ [上传] 失败:', e);
     if(typeof window.showModal === 'function'){
-      window.showModal({ type:'error', title:'操作失败', message:`❌ 上传失败：${msg}`, confirmText:'知道了' });
+      window.showModal({ type:'error', title:'上传失败', message:`❌ 上传失败：${msg}\n请检查网络连接和登录状态`, confirmText:'知道了' });
     }else{
       alert('上传失败：' + msg);
     }
@@ -30997,47 +31013,89 @@ async function tpiLoadToday(){
 
     const docId = __tpi_docId(userId, dateISO);
 
+    console.log('📥 [下载] 开始下载数据:', { dateISO, docId });
+
     let doc = null;
     try{
       doc = await databases.getDocument(DB_ID, COL_ID, docId);
+      console.log('✅ [下载] 获取文档成功 (直接查询)');
     }catch(e){
       // 兜底：按 userId+date 查询（兼容你以前不同 docId 的保存）
+      console.log('⚠️ [下载] 直接查询失败，尝试列表查询...');
       const res = await databases.listDocuments(DB_ID, COL_ID, [
         Appwrite.Query.equal('userId', userId),
         Appwrite.Query.equal('date', dateISO),
         Appwrite.Query.limit(1)
       ]);
       doc = (res && res.documents && res.documents[0]) ? res.documents[0] : null;
+      if(doc) console.log('✅ [下载] 获取文档成功 (列表查询)');
     }
 
     if(!doc || !doc.data){
+      console.error('❌ [下载] 未找到数据');
       if(typeof window.showModal === 'function'){
-        window.showModal({ type:'error', title:'操作失败', message:'❌ 未找到该日期的保存数据', confirmText:'知道了' });
+        window.showModal({ type:'error', title:'下载失败', message:`❌ 云端没有找到 ${dateISO} 的保存数据\n请确认该日期是否已上传`, confirmText:'知道了' });
       }
       return;
     }
 
+    console.log('📦 [下载] 文档数据大小:', doc.data.length, '字节');
+
     let obj = null;
     try{
       obj = JSON.parse(doc.data);
+      console.log('✅ [下载] JSON解析成功');
     }catch(e){
       // 如果不是 JSON，就把字符串包起来（尽量不报错）
+      console.warn('⚠️ [下载] JSON解析失败，使用原始数据');
       obj = { __raw: doc.data, date: dateISO };
     }
 
-    const ok = __tpi_restoreDailySnapshotObject(obj);
+    // 检查数据结构并记录
+    console.log('📊 [下载] 数据结构分析:', {
+      isObject: typeof obj === 'object',
+      hasDateKey: obj && Object.keys(obj).some(k => k.match(/^\d{4}[-\/]\d{2}[-\/]\d{2}$/)),
+      hasFormState: !!(obj && obj._formState),
+      topLevelKeys: obj ? Object.keys(obj).slice(0, 10) : []
+    });
+
+    // restoreUIFromData expects the data directly, NOT wrapped in a date key
+    // If the data is wrapped (like {2026-02-13: {...}}), unwrap it
+    let dataToRestore = obj;
+    if(obj && typeof obj === 'object'){
+      const keys = Object.keys(obj);
+      // Check if it's wrapped in a date key
+      if(keys.length === 1 && keys[0].match(/^\d{4}[-\/]\d{2}[-\/]\d{2}$/)){
+        dataToRestore = obj[keys[0]];
+        console.log('📦 [下载] 检测到日期包裹结构，已解包:', keys[0]);
+      }
+    }
+
+    console.log('🔄 [下载] 准备恢复UI，数据包含字段:', dataToRestore ? Object.keys(dataToRestore).length : 0);
+
+    const ok = __tpi_restoreDailySnapshotObject(dataToRestore);
     if(!ok){
+      console.error('❌ [下载] restoreUIFromData未找到或执行失败');
       throw new Error('restoreUIFromData not found');
     }
 
+    console.log('✅ [下载] UI恢复完成');
+
     if(typeof window.showModal === 'function'){
-      window.showModal({ type:'success', title:'同步成功', message:`✅ 已下载：${dateISO}`, confirmText:'好的' });
+      const dataSizeKB = (doc.data.length / 1024).toFixed(2);
+      const fieldsCount = dataToRestore ? Object.keys(dataToRestore).length : 0;
+      window.showModal({ 
+        type:'success', 
+        title:'下载成功', 
+        message:`✅ 已成功下载 ${dateISO} 的数据\n数据大小: ${dataSizeKB} KB\n包含字段: ${fieldsCount} 个`, 
+        confirmText:'好的' 
+      });
     }
   }catch(e){
     const msg = (e && (e.message || e.response || e)) ? String(e.message || e) : '未知错误';
-    console.error('下载失败', e);
+    console.error('❌ [下载] 完整错误:', e);
     if(typeof window.showModal === 'function'){
-      window.showModal({ type:'error', title:'操作失败', message:`❌ 下载失败：${msg}`, confirmText:'知道了' });
+      window.showModal({ type:'error', title:'下载失败', message:`❌ 下载失败：${msg}\n请检查网络连接和登录状态`, confirmText:'知道了' });
     }else{
       alert('下载失败：' + msg);
     }
