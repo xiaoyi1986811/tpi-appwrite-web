@@ -4779,7 +4779,7 @@ window.exportAsCSV = function() {
 
       <div style="font-weight:700; color:#111827;">👤 已登录: <span id="tpi-current-user"></span></div>
       <button type="button" onclick="tpiSaveToday()" style="padding:12px 20px; background: linear-gradient(135deg,#3b82f6,#2563eb); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-        ⬆️ 同步所选日期到云端
+        ⬆️ 同步上传所传日期到云端
       </button>
       <button type="button" onclick="tpiLoadToday()" style="padding:12px 20px; background: linear-gradient(135deg,#06b6d4,#0891b2); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
         ⬇️ 从云端下载所选日期数据
@@ -30046,15 +30046,8 @@ try{
   // ⚠️ TODO: 请替换为你的 Appwrite 配置
   const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
   const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
-  const APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // 数据库 ID (真实 Database ID)
-  const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (Collection ID) (需要在Appwrite控制台创建)
-
-
-  // 统一日期格式：支持 YYYY/MM/DD 或 YYYY-MM-DD
-  function tpiNormalizeDate(d){
-    if (!d) return d;
-    return String(d).trim().replace(/\//g,'-');
-  }
+  const APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // ✅ 真实 Database ID // 数据库 ID
+  const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
 
   // 初始化 Appwrite 客户端
   var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
@@ -30350,12 +30343,9 @@ window.__tpi_syncDateToMain = function(){
     if (!__tpi_silent) tpiShowMsg('tpi-sync-msg', '⏳ 正在同步到云端...');
     try{
       // 构建文档数据
-      const dateKey = tpiNormalizeDate(date);
-      const docId = `${TPI_CURRENT_USER}_${dateKey}`;
       const documentData = {
-        userId: TPI_CURRENT_USER,
-        date: dateKey,
-        data: JSON.stringify(fullState)
+        date: date,
+        data: fullState
       };
 
       // 使用 date 作为文档 ID（去除非法字符）
@@ -30559,7 +30549,7 @@ var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwri
 var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
 // 数据库和集合 ID (需与你在 Appwrite 控制台创建的一致)
-const DATABASE_ID = 'tpi_database';
+const DATABASE_ID = '698dad1c0013e7c982fe'; // ✅ 真实 Database ID
 const COLLECTION_ID = 'daily_records';
 
 
@@ -30863,8 +30853,190 @@ var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.
 
 var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
 var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
-const DB_ID = 'tpi_database';
+const DB_ID = '698dad1c0013e7c982fe'; // ✅ 真实 Database ID
 const COL_ID = 'daily_records';
+
+// ======================= Cloud Sync (Appwrite) 真实实现 =======================
+// 说明：页面按钮 onclick 用的是 tpiSaveToday / tpiLoadToday（之前缺失导致“点了没反应/提示 stub”）
+//      这里补齐实现，并确保写入字段：userId/date/data(字符串) 以匹配你的 daily_records 表结构。
+
+function __tpi_normDateAnyToISO(s){
+  if(!s) return '';
+  // 支持 YYYY/MM/DD 或 YYYY-MM-DD
+  const t = String(s).trim().replace(/\//g,'-');
+  // 简单校验
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : t;
+}
+function __tpi_isoToSlash(s){
+  const iso = __tpi_normDateAnyToISO(s);
+  return iso.replace(/-/g,'/');
+}
+function __tpi_getSyncDateISO(){
+  const el = document.getElementById('syncDateInput');
+  const raw = el ? el.value : '';
+  return __tpi_normDateAnyToISO(raw);
+}
+function __tpi_setMainDateFromISO(iso){
+  try{
+    const dateInput = document.getElementById('date-input');
+    if(!dateInput) return;
+    const slash = __tpi_isoToSlash(iso);
+    if(dateInput.value !== slash){
+      dateInput.value = slash;
+      // 触发页面原有“切换日期”逻辑（不改结构，只触发事件）
+      dateInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }catch(e){}
+}
+async function __tpi_getCurrentUser(){
+  // 以 account.get() 为准，拿到真实 $id
+  return await account.get();
+}
+function __tpi_docId(userId, dateISO){
+  // Appwrite 自定义文档 ID 建议：简单、稳定、可预测
+  // 用 userId + '_' + YYYYMMDD，避免特殊字符
+  const d = String(dateISO).replace(/-/g,'');
+  return `${userId}_${d}`;
+}
+function __tpi_getDailySnapshotObject(){
+  // 复用你页面已有的“采集今日/当前日期”逻辑
+  if(typeof window.collectDailyData === 'function'){
+    return window.collectDailyData();
+  }
+  // 兜底：尽量从 localStorage 把当前日期快照抓出来（如果存在）
+  const iso = __tpi_getSyncDateISO() || (__tpi_normDateAnyToISO((document.getElementById('date-input')||{}).value));
+  return { __fallback: true, date: iso, localStorage: { ...localStorage } };
+}
+function __tpi_restoreDailySnapshotObject(obj){
+  // 复用你页面已有的恢复逻辑
+  if(typeof window.restoreUIFromData === 'function'){
+    window.restoreUIFromData(obj);
+    return true;
+  }
+  return false;
+}
+
+async function tpiSaveToday(){
+  const dateISO = __tpi_getSyncDateISO();
+  if(!dateISO){
+    if(typeof window.showModal === 'function'){
+      window.showModal({ type:'error', title:'操作失败', message:'❌ 请先选择同步日期', confirmText:'知道了' });
+    }
+    return;
+  }
+  __tpi_setMainDateFromISO(dateISO);
+
+  try{
+    const user = await __tpi_getCurrentUser();
+    const userId = user && user.$id ? user.$id : '';
+    if(!userId) throw new Error('no userId');
+
+    const snapshotObj = __tpi_getDailySnapshotObject();
+    // 确保 data 是字符串（你的表里 data=longtext）
+    const dataStr = JSON.stringify(snapshotObj);
+
+    const docId = __tpi_docId(userId, dateISO);
+    const payload = { userId, date: dateISO, data: dataStr };
+
+    // 给当前用户读写权限（单账号也没问题）
+    const perms = [
+      Appwrite.Permission.read(Appwrite.Role.user(userId)),
+      Appwrite.Permission.update(Appwrite.Role.user(userId)),
+      Appwrite.Permission.delete(Appwrite.Role.user(userId)),
+    ];
+
+    try{
+      await databases.createDocument(DB_ID, COL_ID, docId, payload, perms);
+    }catch(e){
+      // 已存在则更新
+      if(e && (e.code === 409 || e.type === 'document_already_exists' || String(e.message||'').includes('already exists'))){
+        await databases.updateDocument(DB_ID, COL_ID, docId, payload, perms);
+      }else{
+        throw e;
+      }
+    }
+
+    if(typeof window.showModal === 'function'){
+      window.showModal({ type:'success', title:'同步成功', message:`✅ 已上传：${dateISO}`, confirmText:'好的' });
+    }
+  }catch(e){
+    const msg = (e && (e.message || e.response || e)) ? String(e.message || e) : '未知错误';
+    console.error('上传失败', e);
+    if(typeof window.showModal === 'function'){
+      window.showModal({ type:'error', title:'操作失败', message:`❌ 上传失败：${msg}`, confirmText:'知道了' });
+    }else{
+      alert('上传失败：' + msg);
+    }
+  }
+}
+
+async function tpiLoadToday(){
+  const dateISO = __tpi_getSyncDateISO();
+  if(!dateISO){
+    if(typeof window.showModal === 'function'){
+      window.showModal({ type:'error', title:'操作失败', message:'❌ 请先选择同步日期', confirmText:'知道了' });
+    }
+    return;
+  }
+  __tpi_setMainDateFromISO(dateISO);
+
+  try{
+    const user = await __tpi_getCurrentUser();
+    const userId = user && user.$id ? user.$id : '';
+    if(!userId) throw new Error('no userId');
+
+    const docId = __tpi_docId(userId, dateISO);
+
+    let doc = null;
+    try{
+      doc = await databases.getDocument(DB_ID, COL_ID, docId);
+    }catch(e){
+      // 兜底：按 userId+date 查询（兼容你以前不同 docId 的保存）
+      const res = await databases.listDocuments(DB_ID, COL_ID, [
+        Appwrite.Query.equal('userId', userId),
+        Appwrite.Query.equal('date', dateISO),
+        Appwrite.Query.limit(1)
+      ]);
+      doc = (res && res.documents && res.documents[0]) ? res.documents[0] : null;
+    }
+
+    if(!doc || !doc.data){
+      if(typeof window.showModal === 'function'){
+        window.showModal({ type:'error', title:'操作失败', message:'❌ 未找到该日期的保存数据', confirmText:'知道了' });
+      }
+      return;
+    }
+
+    let obj = null;
+    try{
+      obj = JSON.parse(doc.data);
+    }catch(e){
+      // 如果不是 JSON，就把字符串包起来（尽量不报错）
+      obj = { __raw: doc.data, date: dateISO };
+    }
+
+    const ok = __tpi_restoreDailySnapshotObject(obj);
+    if(!ok){
+      throw new Error('restoreUIFromData not found');
+    }
+
+    if(typeof window.showModal === 'function'){
+      window.showModal({ type:'success', title:'同步成功', message:`✅ 已下载：${dateISO}`, confirmText:'好的' });
+    }
+  }catch(e){
+    const msg = (e && (e.message || e.response || e)) ? String(e.message || e) : '未知错误';
+    console.error('下载失败', e);
+    if(typeof window.showModal === 'function'){
+      window.showModal({ type:'error', title:'操作失败', message:`❌ 下载失败：${msg}`, confirmText:'知道了' });
+    }else{
+      alert('下载失败：' + msg);
+    }
+  }
+}
+// ======================= Cloud Sync (Appwrite) 真实实现结束 =======================
+
+
 
 // 2. 页面加载时检查登录状态
 window.addEventListener('DOMContentLoaded', async () => {
