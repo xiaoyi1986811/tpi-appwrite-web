@@ -30344,12 +30344,13 @@ window.__tpi_syncDateToMain = function(){
     try{
       // 构建文档数据
       const documentData = {
+        userId: TPI_CURRENT_USER,
         date: date,
         data: fullState
       };
 
       // 使用 date 作为文档 ID（去除非法字符）
-      const docId = date.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const docId = (`${TPI_CURRENT_USER}_${date}`).replace(/[^a-zA-Z0-9_-]/g, '_');
 
       let result;
       try {
@@ -30402,7 +30403,7 @@ window.__tpi_syncDateToMain = function(){
     tpiShowMsg('tpi-sync-msg', '⏳ 正在从云端下载...');
     try{
       // 使用 date 作为文档 ID
-      const docId = date.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const docId = (`${TPI_CURRENT_USER}_${date}`).replace(/[^a-zA-Z0-9_-]/g, '_');
       
       // 获取文档
       const document = await databases.getDocument(
@@ -30723,6 +30724,7 @@ async function loadTodaysData() {
     const today = getTodayString();
     try {
         const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+            Appwrite.Query.equal('userId', TPI_CURRENT_USER),
             Appwrite.Query.equal('date', today),
             Appwrite.Query.limit(1)
         ]);
@@ -30761,6 +30763,7 @@ async function saveTodaysData() {
 
     // 构建要保存的数据对象（保留提示词字段名 date + 你全量快照 data）
     const dataToSave = {
+        userId: TPI_CURRENT_USER,
         date: today,
         data: snapshot || {}
     };
@@ -30768,6 +30771,7 @@ async function saveTodaysData() {
     try {
         // 检查今天的数据是否存在
         const existingDocs = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+            Appwrite.Query.equal('userId', TPI_CURRENT_USER),
             Appwrite.Query.equal('date', today),
             Appwrite.Query.limit(1)
         ]);
@@ -30786,7 +30790,8 @@ async function saveTodaysData() {
             await databases.createDocument(
                 DATABASE_ID,
                 COLLECTION_ID,
-                today, // 使用日期作为文档ID，保证每天一条
+                `${TPI_CURRENT_USER}_${today}`,
+                 // 使用日期作为文档ID，保证每天一条
                 dataToSave
             );
         }
