@@ -30346,7 +30346,7 @@ window.__tpi_syncDateToMain = function(){
       const documentData = {
         userId: TPI_CURRENT_USER,
         date: date,
-        data: fullState
+        data: JSON.stringify(fullState)
       };
 
       // 使用 date 作为文档 ID（去除非法字符）
@@ -30414,15 +30414,25 @@ window.__tpi_syncDateToMain = function(){
 
       console.log('✅ 加载文档成功:', document);
 
-      // 数据字段兼容
-      const payload = (document && document.data) || null;
+      // 数据字段兼容（data 字段为 longtext 字符串）
+      const payloadStr = (document && typeof document.data === 'string') ? document.data : null;
+      let payload = null;
+      if (payloadStr) {
+        try {
+          payload = JSON.parse(payloadStr);
+        } catch (e) {
+          console.error('❌ 云端数据不是合法 JSON:', e, payloadStr?.slice?.(0, 200));
+          tpiShowMsg('tpi-sync-msg', `❌ 云端 ${date} 数据损坏（JSON 解析失败）`, true);
+          return;
+        }
+      }
 
       if (!payload || typeof payload !== 'object') {
         tpiShowMsg('tpi-sync-msg', `ℹ️ 云端无 ${date} 的数据`, false);
         return;
       }
 
-      // ⭐⭐⭐ 关键：恢复整个 localStorage 状态（全量覆盖）
+// ⭐⭐⭐ 关键：恢复整个 localStorage 状态（全量覆盖）
       // 为避免把"当前会话"也抹掉，先备份必要字段（随后会补回）
       const keepUser = auth.user;
 
