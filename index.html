@@ -4779,7 +4779,7 @@ window.exportAsCSV = function() {
 
       <div style="font-weight:700; color:#111827;">👤 已登录: <span id="tpi-current-user"></span></div>
       <button type="button" onclick="tpiSaveToday()" style="padding:12px 20px; background: linear-gradient(135deg,#3b82f6,#2563eb); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-        ⬆️ 同步上传所选日期到云端
+        ⬆️ 同步所选日期到云端
       </button>
       <button type="button" onclick="tpiLoadToday()" style="padding:12px 20px; background: linear-gradient(135deg,#06b6d4,#0891b2); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
         ⬇️ 从云端下载所选日期数据
@@ -30046,8 +30046,15 @@ try{
   // ⚠️ TODO: 请替换为你的 Appwrite 配置
   const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
   const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
-  const APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // 数据库 ID
-  const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
+  const APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // 数据库 ID (真实 Database ID)
+  const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (Collection ID) (需要在Appwrite控制台创建)
+
+
+  // 统一日期格式：支持 YYYY/MM/DD 或 YYYY-MM-DD
+  function tpiNormalizeDate(d){
+    if (!d) return d;
+    return String(d).trim().replace(/\//g,'-');
+  }
 
   // 初始化 Appwrite 客户端
   var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
@@ -30343,9 +30350,12 @@ window.__tpi_syncDateToMain = function(){
     if (!__tpi_silent) tpiShowMsg('tpi-sync-msg', '⏳ 正在同步到云端...');
     try{
       // 构建文档数据
+      const dateKey = tpiNormalizeDate(date);
+      const docId = `${TPI_CURRENT_USER}_${dateKey}`;
       const documentData = {
-        date: date,
-        data: fullState
+        userId: TPI_CURRENT_USER,
+        date: dateKey,
+        data: JSON.stringify(fullState)
       };
 
       // 使用 date 作为文档 ID（去除非法字符）
@@ -30720,49 +30730,22 @@ function loadMainInterface() {
 
 // 从 Appwrite 加载今日的 TPI 数据
 async function loadTodaysData() {
-  const selectedDate = (document.getElementById('tpi-sync-date')?.value || '').trim() || new Date().toISOString().split('T')[0];
-  try {
-    const user = await account.get();
-    const userId = user.$id;
-
-    // 采用稳定的 Document ID，避免同一天多条记录、也避免跨用户串数据
-    const docId = `${userId}_${selectedDate}`;
-
-    let doc = null;
+    const today = getTodayString();
     try {
-      doc = await databases.getDocument(DATABASE_ID, COLLECTION_ID, docId);
-    } catch (e) {
-      // 不存在就继续用 listDocuments 兜底（兼容你之前已经写入的数据）
-      doc = null;
-    }
+        const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+            Appwrite.Query.equal('date', today),
+            Appwrite.Query.limit(1)
+        ]);
 
-    if (!doc) {
-      const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
-        Appwrite.Query.equal('date', selectedDate),
-        Appwrite.Query.equal('userId', userId),
-        Appwrite.Query.orderDesc('$updatedAt'),
-        Appwrite.Query.limit(1)
-      ]);
-      if (!response.documents || response.documents.length === 0) {
-        showModal('云端无该日期数据', `未找到 ${selectedDate} 的数据。`, '知道了');
-        return;
-      }
-      doc = response.documents[0];
-    }
+        if (response.documents.length > 0) {
+            const savedData = response.documents[0].data;
 
-    // data 字段现在统一存 JSON 字符串
-    let payload = doc.data;
-    if (payload && typeof payload === 'string') {
-      try { payload = JSON.parse(payload); } catch (e) {}
-    }
-
-    restoreUIFromData(payload);
-    showModal('下载成功', `已从云端加载 ${selectedDate} 的数据。`, '好的');
-  } catch (e) {
-    console.error('加载失败:', e);
-    showModal('下载失败', (e && e.message) ? e.message : String(e), '知道了');
-  }
-}
+            // 提示词要求：把 savedData 映射回表单。
+            // 为了保证“全站输入/勾选/规则生成内容”100%恢复，这里采用整包快照恢复：
+            try{
+              if (savedData && savedData.data && typeof window.restoreUIFromData === 'function') {
+                window.restoreUIFromData(savedData.data);
+              }
             }catch(e){ console.warn('restoreUIFromData failed:', e); }
 
             console.log('已加载今日数据:', savedData);
@@ -30774,34 +30757,16 @@ async function loadTodaysData() {
 
 // 将当前表单数据保存到 Appwrite
 async function saveTodaysData() {
-  const selectedDate = (document.getElementById('tpi-sync-date')?.value || '').trim() || new Date().toISOString().split('T')[0];
-  try {
-    const user = await account.get();
-    const userId = user.$id;
+    const today = getTodayString();
 
-    const fullState = collectAllUIData();
-    const docId = `${userId}_${selectedDate}`;
-
-    const documentData = {
-      date: selectedDate,
-      userId: userId,
-      data: JSON.stringify(fullState)
-    };
-
-    // 先尝试更新，不存在则创建（使用固定 docId）
-    try {
-      await databases.updateDocument(DATABASE_ID, COLLECTION_ID, docId, documentData);
-    } catch (e) {
-      // 404 / not found -> create
-      await databases.createDocument(DATABASE_ID, COLLECTION_ID, docId, documentData);
-    }
-
-    showModal('上传成功', `已同步上传 ${selectedDate} 的数据到云端。`, '好的');
-  } catch (e) {
-    console.error('保存失败:', e);
-    showModal('上传失败', (e && e.message) ? e.message : String(e), '知道了');
-  }
-}
+    // 👇👇👇 提示词要求：收集表单数据 👇👇👇
+    // 为了完整性：使用你页面现有 collectDailyData 抓取“整站快照”
+    let snapshot = null;
+    try{
+      if (typeof window.collectDailyData === 'function') {
+        const obj = window.collectDailyData();
+        snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+      }
     }catch(e){ console.warn('collectDailyData failed:', e); }
 
     // 构建要保存的数据对象（保留提示词字段名 date + 你全量快照 data）
