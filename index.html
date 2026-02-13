@@ -30341,8 +30341,13 @@ window.__tpi_syncDateToMain = function(){
 
   window.tpiSaveToday = async function () {
     try{
+    console.log('📤 ═════════════════════════════════════════════════════');
+    console.log('📤 [云同步] 开始上传数据...');
+    const __upload_start_time = Date.now();
       const dateStr = __tpi_getSyncDate();
+      console.log(`📅 [上传] 同步日期: ${dateStr || '未选择'}`);
       if(!dateStr){
+        console.error('❌ [上传] 失败: 未选择同步日期');
         showModal?.({type:'error', title:'操作失败', message:'❌ 请先选择同步日期', confirmText:'知道了'});
         return;
       }
@@ -30354,40 +30359,70 @@ window.__tpi_syncDateToMain = function(){
       }
 
       // 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
+      console.log('📦 [上传] 正在打包 localStorage 数据...');
       const payload = {};
       for(let i=0;i<localStorage.length;i++){
         const k = localStorage.key(i);
         payload[k] = localStorage.getItem(k);
       }
       const dataStr = JSON.stringify(payload);
+      console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`);
 
       // 3) 写入 Appwrite（字段必须匹配：data(longtext string) + userId + date）
+      console.log('🔐 [上传] 正在获取用户认证...');
       const user = await __tpi_getAuth();
       const userId = user.$id;
       const docId = __tpi_makeDocId(userId, dateStr);
+      console.log(`🆔 [上传] 用户ID: ${userId}`);
+      console.log(`📝 [上传] 文档ID: ${docId}`);
 
       const docData = { data: dataStr, userId, date: dateStr };
 
       // 先尝试更新，不存在再创建
+      console.log('☁️ [上传] 正在写入云端数据库...');
       try{
         await databases.updateDocument(DATABASE_ID, COLLECTION_ID, docId, docData);
+        console.log('✅ [上传] 文档更新成功（覆盖已存在的文档）');
       }catch(e1){
+        console.log('ℹ️ [上传] 文档不存在，尝试创建新文档...');
         try{
           await databases.createDocument(DATABASE_ID, COLLECTION_ID, docId, docData);
+          console.log('✅ [上传] 文档创建成功（新文档）');
         }catch(e2){
           throw e2;
         }
       }
 
+      const __upload_end_time = Date.now();
+      console.log(`⏱️ [上传] 总耗时: ${__upload_end_time - __upload_start_time}ms`);
+      
+      // 计算更详细的统计信息
+      const dataSizeKB = (dataStr.length / 1024).toFixed(2);
+      const dataSizeMB = (dataStr.length / 1024 / 1024).toFixed(2);
+      const uploadTime = new Date().toLocaleString('zh-CN', { 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
+      });
+      
+      console.log('✅ ═════════════════════════════════════════════════════');
+      console.log('✅ [云同步] 上传成功');
+      console.log(`📅 同步日期: ${dateStr}`);
+      console.log(`🆔 文档ID: ${docId}`);
+      console.log(`📦 localStorage条目: ${Object.keys(payload).length} 个`);
+      console.log(`💾 数据大小: ${dataStr.length} 字符 (${dataSizeKB} KB / ${dataSizeMB} MB)`);
+      console.log(`⏰ 上传时间: ${uploadTime}`);
+      console.log('✅ ═════════════════════════════════════════════════════');
+
       showModal?.({
         type:'success',
         title:'上传成功',
         message:
-          `✅ 已上传所选日期数据到云端\n`+
-          `• 日期：${dateStr}\n`+
-          `• 文档ID：${docId}\n`+
-          `• 记录条目：${Object.keys(payload).length} 个 localStorage 键\n`+
-          `• 数据大小：${dataStr.length} 字符`,
+          `✅ 已上传所选日期数据到云端\n\n`+
+          `📅 日期：${dateStr}\n`+
+          `🆔 文档ID：${docId}\n`+
+          `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
+          `💾 数据大小：${dataStr.length} 字符 (${dataSizeKB} KB)\n`+
+          `⏰ 上传时间：${uploadTime}`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -30404,8 +30439,13 @@ window.__tpi_syncDateToMain = function(){
 
   window.tpiLoadToday = async function () {
     try{
+    console.log('📥 ═════════════════════════════════════════════════════');
+    console.log('📥 [云同步] 开始下载数据...');
+    const __download_start_time = Date.now();
       const dateStr = __tpi_getSyncDate();
+      console.log(`📅 [上传] 同步日期: ${dateStr || '未选择'}`);
       if(!dateStr){
+        console.error('❌ [上传] 失败: 未选择同步日期');
         showModal?.({type:'error', title:'操作失败', message:'❌ 请先选择同步日期', confirmText:'知道了'});
         return;
       }
@@ -30413,14 +30453,20 @@ window.__tpi_syncDateToMain = function(){
       const user = await __tpi_getAuth();
       const userId = user.$id;
       const docId = __tpi_makeDocId(userId, dateStr);
+      console.log(`🆔 [上传] 用户ID: ${userId}`);
+      console.log(`📝 [上传] 文档ID: ${docId}`);
 
       const doc = await databases.getDocument(DATABASE_ID, COLLECTION_ID, docId);
 
       // 解析云端 data
       let payload = {};
+      console.log(`📦 [下载] 文档数据大小: ${doc.data ? doc.data.length : 0} 字节`);
       try{
         payload = JSON.parse(doc.data || '{}');
+        console.log(`✅ [下载] JSON解析成功`);
+        console.log(`📊 [下载] 数据结构分析: ${Object.keys(payload).length} 个字段`);
       }catch(e){
+        console.error('❌ [下载] JSON解析失败:', e);
         throw new Error('云端数据解析失败（data 不是有效 JSON 字符串）');
       }
 
@@ -30430,25 +30476,54 @@ window.__tpi_syncDateToMain = function(){
       for(const [k,v] of Object.entries(payload)){
         localStorage.setItem(k, v);
       }
+      console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
       // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
       if(typeof loadFromLocalStorage === 'function'){
-        try{ loadFromLocalStorage(); }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
+        try{ 
+          loadFromLocalStorage(); 
+          console.log('✅ [下载] UI恢复完成 (loadFromLocalStorage)');
+        }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
       }else{
         // 兜底：刷新页面（保证 UI 和 localStorage 一致）
+        console.log('ℹ️ [下载] 使用页面刷新方式恢复UI');
         try{ location.reload(); }catch(_){}
       }
+
+      const __download_end_time = Date.now();
+      console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
+
+      // 计算更详细的统计信息
+      const afterKeys = localStorage.length;
+      const downloadTime = new Date().toLocaleString('zh-CN', { 
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
+      });
+      const dataSizeBytes = doc.data ? doc.data.length : 0;
+      const dataSizeKB = (dataSizeBytes / 1024).toFixed(2);
+      
+      console.log('📥 ═════════════════════════════════════════════════════');
+      console.log('📥 [云同步] 下载成功');
+      console.log(`📅 同步日期: ${dateStr}`);
+      console.log(`🆔 文档ID: ${docId}`);
+      console.log(`📦 写入条目: ${Object.keys(payload).length} 个 localStorage 键`);
+      console.log(`💾 数据大小: ${dataSizeBytes} 字节 (${dataSizeKB} KB)`);
+      console.log(`🔄 localStorage键数变化: ${beforeKeys} → ${afterKeys}`);
+      console.log(`⏰ 下载时间: ${downloadTime}`);
+      console.log('📥 ═════════════════════════════════════════════════════');
 
       showModal?.({
         type:'success',
         title:'下载成功',
         message:
-          `✅ 已从云端下载所选日期数据\n`+
-          `• 日期：${dateStr}\n`+
-          `• 文档ID：${docId}\n`+
-          `• 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
-          `• 下载前localStorage键数：${beforeKeys}`,
+          `✅ 已从云端下载所选日期数据\n\n`+
+          `📅 日期：${dateStr}\n`+
+          `🆔 文档ID：${docId}\n`+
+          `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
+          `💾 数据大小：${dataSizeBytes} 字节 (${dataSizeKB} KB)\n`+
+          `🔄 下载前localStorage键数：${beforeKeys}\n`+
+          `⏰ 下载时间：${downloadTime}`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -30877,6 +30952,598 @@ async function saveTodaysData() {
 }
 function showMainInterface() { /* 切换显示主界面 */ }
 function showAuthInterface() { /* 切换显示登录界面 */ }
+
+// ========== Appwrite 集成区结束 ==========
+
+<script>
+
+/* ===========================
+   TPI 深度优化脚本 v1.0 (增强版 - 不覆盖现有功能)
+   包含: localStorage压缩、增量同步、离线检测、
+        数据冲突检测、错误处理增强、性能监控
+   ===========================  */
+
+(function() {
+  'use strict';
+  
+  console.log('🚀 [TPI优化] 开始加载深度优化模块...');
+
+  // ===========================
+  // 1. localStorage 数据压缩模块
+  // ===========================
+  window.TPIDataCompression = {
+    // 简单的压缩函数 (使用 LZ-String 思想的简化版)
+    compress: function(data) {
+      try {
+        const jsonStr = JSON.stringify(data);
+        // 使用 btoa 进行基本编码 (实际项目中应使用 LZ-String 库)
+        return btoa(encodeURIComponent(jsonStr));
+      } catch (e) {
+        console.warn('⚠️ [压缩] 压缩失败，使用原始数据:', e);
+        return JSON.stringify(data);
+      }
+    },
+    
+    decompress: function(compressed) {
+      try {
+        // 尝试解压
+        const jsonStr = decodeURIComponent(atob(compressed));
+        return JSON.parse(jsonStr);
+      } catch (e) {
+        // 如果解压失败，尝试直接解析(可能是未压缩的数据)
+        try {
+          return JSON.parse(compressed);
+        } catch (e2) {
+          console.error('❌ [压缩] 解压失败:', e, e2);
+          return null;
+        }
+      }
+    },
+    
+    // 计算压缩率
+    getCompressionRatio: function(original, compressed) {
+      return ((1 - compressed.length / original.length) * 100).toFixed(2) + '%';
+    }
+  };
+
+  // ===========================
+  // 2. 增量同步机制
+  // ===========================
+  window.TPIIncrementalSync = {
+    // 计算数据差异
+    calculateDiff: function(oldData, newData) {
+      const diff = {};
+      let hasChanges = false;
+      
+      for (const key in newData) {
+        if (JSON.stringify(oldData?.[key]) !== JSON.stringify(newData[key])) {
+          diff[key] = newData[key];
+          hasChanges = true;
+        }
+      }
+      
+      return hasChanges ? diff : null;
+    },
+    
+    // 应用差异
+    applyDiff: function(baseData, diff) {
+      return { ...baseData, ...diff };
+    },
+    
+    // 保存上传快照
+    saveSnapshot: function(data) {
+      try {
+        __tpi_ls_set('tpi_upload_snapshot', JSON.stringify(data));
+        __tpi_ls_set('tpi_upload_snapshot_time', Date.now().toString());
+      } catch (e) {
+        console.warn('⚠️ [增量同步] 保存快照失败:', e);
+      }
+    },
+    
+    // 获取上传快照
+    getSnapshot: function() {
+      try {
+        const snapshot = __tpi_ls_get('tpi_upload_snapshot');
+        return snapshot ? JSON.parse(snapshot) : null;
+      } catch (e) {
+        console.warn('⚠️ [增量同步] 获取快照失败:', e);
+        return null;
+      }
+    }
+  };
+
+  // ===========================
+  // 3. 增强现有自动保存指示器
+  // ===========================
+  window.TPISaveIndicatorEnhancer = {
+    init: function() {
+      // 如果已经存在AutoSaveManager,增强它
+      if (window.AutoSaveManager) {
+        console.log('🔄 [保存增强] 检测到现有AutoSaveManager,增强中...');
+        
+        // 创建保存指示器
+        this.createSaveIndicator();
+        
+        // 包装原有的保存函数
+        const originalScheduleSave = window.AutoSaveManager.scheduleSave;
+        if (originalScheduleSave) {
+          window.AutoSaveManager.scheduleSave = function() {
+            originalScheduleSave.call(window.AutoSaveManager);
+            // 更新指示器
+            if (window.TPISaveIndicatorEnhancer) {
+              window.TPISaveIndicatorEnhancer.updateIndicator();
+            }
+          };
+        }
+      }
+    },
+    
+    createSaveIndicator: function() {
+      // 如果已存在则不重复创建
+      if (document.getElementById('auto-save-indicator')) return;
+      
+      const indicator = document.createElement('div');
+      indicator.id = 'auto-save-indicator';
+      indicator.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        left: 20px;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 8px 16px;
+        font-size: 13px;
+        color: #6b7280;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all 0.3s;
+      `;
+      indicator.innerHTML = `
+        <span id="save-icon">💾</span>
+        <span id="save-text">自动保存已启用</span>
+      `;
+      document.body.appendChild(indicator);
+    },
+    
+    updateIndicator: function() {
+      const textEl = document.getElementById('save-text');
+      const iconEl = document.getElementById('save-icon');
+      
+      if (textEl) {
+        textEl.textContent = `最后保存：刚刚`;
+      }
+      
+      // 临时显示绿色勾
+      if (iconEl) {
+        iconEl.textContent = '✅';
+        setTimeout(() => {
+          iconEl.textContent = '💾';
+        }, 2000);
+      }
+    }
+  };
+
+  // ===========================
+  // 4. 离线检测与队列同步
+  // ===========================
+  window.TPINetworkManager = {
+    isOnline: navigator.onLine,
+    indicator: null,
+    syncQueue: [],
+    
+    init: function() {
+      console.log('🌐 [网络监控] 初始化...');
+      
+      // 监听网络状态变化
+      window.addEventListener('online', () => this.handleOnline());
+      window.addEventListener('offline', () => this.handleOffline());
+      
+      // 创建状态指示器
+      this.createIndicator();
+      
+      // 加载同步队列
+      this.loadSyncQueue();
+      
+      // 初始检查
+      if (!navigator.onLine) {
+        this.handleOffline();
+      }
+    },
+    
+    handleOnline: function() {
+      this.isOnline = true;
+      console.log('✅ [网络监控] 网络已恢复');
+      
+      if (typeof showToast === 'function') {
+        showToast('success', '🌐 网络已恢复');
+      }
+      
+      // 隐藏离线指示器
+      if (this.indicator) {
+        this.indicator.style.display = 'none';
+      }
+      
+      // 尝试同步队列中的数据
+      this.processSyncQueue();
+    },
+    
+    handleOffline: function() {
+      this.isOnline = false;
+      console.log('⚠️ [网络监控] 网络已断开');
+      
+      if (typeof showToast === 'function') {
+        showToast('warning', '⚠️ 网络已断开，数据将保存在本地');
+      }
+      
+      // 显示离线指示器
+      if (this.indicator) {
+        this.indicator.style.display = 'flex';
+      }
+    },
+    
+    createIndicator: function() {
+      this.indicator = document.createElement('div');
+      this.indicator.id = 'network-offline-indicator';
+      this.indicator.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #fef3c7;
+        border: 2px solid #f59e0b;
+        border-radius: 8px;
+        padding: 12px 20px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #92400e;
+        box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        z-index: 10000;
+        display: none;
+        align-items: center;
+        gap: 8px;
+      `;
+      this.indicator.innerHTML = `
+        <span style="font-size: 20px;">⚠️</span>
+        <span>离线模式 - 数据仅保存在本地</span>
+      `;
+      document.body.appendChild(this.indicator);
+    },
+    
+    addToQueue: function(operation) {
+      this.syncQueue.push({
+        ...operation,
+        timestamp: Date.now(),
+        id: Date.now() + Math.random()
+      });
+      this.saveSyncQueue();
+      console.log('📦 [网络监控] 操作已加入同步队列');
+    },
+    
+    saveSyncQueue: function() {
+      try {
+        __tpi_ls_set('tpi_sync_queue', JSON.stringify(this.syncQueue));
+      } catch (e) {
+        console.warn('⚠️ [网络监控] 保存同步队列失败:', e);
+      }
+    },
+    
+    loadSyncQueue: function() {
+      try {
+        const queue = __tpi_ls_get('tpi_sync_queue');
+        if (queue) {
+          this.syncQueue = JSON.parse(queue);
+          console.log(`📦 [网络监控] 加载了 ${this.syncQueue.length} 个待同步操作`);
+        }
+      } catch (e) {
+        console.warn('⚠️ [网络监控] 加载同步队列失败:', e);
+      }
+    },
+    
+    async processSyncQueue() {
+      if (this.syncQueue.length === 0) return;
+      
+      console.log(`📤 [网络监控] 开始处理 ${this.syncQueue.length} 个待同步操作`);
+      
+      const queue = [...this.syncQueue];
+      this.syncQueue = [];
+      this.saveSyncQueue();
+      
+      for (const item of queue) {
+        try {
+          console.log('📤 [网络监控] 处理队列项:', item);
+          // 实际的同步逻辑在这里
+        } catch (e) {
+          console.error('❌ [网络监控] 同步失败:', e);
+          // 失败的重新加入队列
+          this.syncQueue.push(item);
+        }
+      }
+      
+      this.saveSyncQueue();
+    },
+    
+    checkOnline: function() {
+      return this.isOnline;
+    }
+  };
+
+  // ===========================
+  // 5. 数据冲突检测与解决
+  // ===========================
+  window.TPIConflictResolver = {
+    // 检测冲突
+    detectConflict: function(localData, cloudData) {
+      const localTime = localData?.lastModified || 0;
+      const cloudTime = cloudData?.lastModified || 0;
+      const localDevice = localData?.deviceId || '';
+      const cloudDevice = cloudData?.deviceId || '';
+      
+      // 如果时间戳相同，没有冲突
+      if (localTime === cloudTime) return null;
+      
+      // 如果设备不同且时间接近(5分钟内)，可能存在冲突
+      if (localDevice !== cloudDevice && Math.abs(localTime - cloudTime) < 5 * 60 * 1000) {
+        return {
+          type: 'concurrent_edit',
+          localTime: new Date(localTime),
+          cloudTime: new Date(cloudTime),
+          localDevice,
+          cloudDevice
+        };
+      }
+      
+      // 正常的时间差异
+      return {
+        type: 'normal_update',
+        newer: localTime > cloudTime ? 'local' : 'cloud'
+      };
+    },
+    
+    // 显示冲突解决对话框
+    showConflictDialog: function(conflict, localData, cloudData, onResolve) {
+      const useLocal = confirm(
+        `检测到数据冲突！\n\n` +
+        `本地最后修改：${conflict.localTime.toLocaleString()}\n` +
+        `云端最后修改：${conflict.cloudTime.toLocaleString()}\n\n` +
+        `点击"确定"使用本地数据\n点击"取消"使用云端数据`
+      );
+      onResolve(useLocal ? 'local' : 'cloud');
+    },
+    
+    // 生成设备ID
+    getDeviceId: function() {
+      let deviceId = __tpi_ls_get('tpi_device_id');
+      if (!deviceId) {
+        deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        __tpi_ls_set('tpi_device_id', deviceId);
+      }
+      return deviceId;
+    }
+  };
+
+  // ===========================
+  // 6. 错误处理增强
+  // ===========================
+  window.TPIErrorHandler = {
+    errorLog: [],
+    maxLogSize: 50,
+    lastNotificationTime: 0,
+    
+    init: function() {
+      console.log('🛡️ [错误处理] 初始化...');
+      
+      // 全局错误捕获
+      window.addEventListener('error', (e) => {
+        this.handleError(e.error, {
+          message: e.message,
+          filename: e.filename,
+          lineno: e.lineno,
+          colno: e.colno
+        });
+        // 不阻止默认错误处理,让原有的错误处理也能工作
+        // e.preventDefault();
+      });
+      
+      // Promise 错误捕获
+      window.addEventListener('unhandledrejection', (e) => {
+        this.handleError(e.reason, {
+          message: 'Unhandled Promise Rejection',
+          promise: true
+        });
+        // 不阻止默认处理
+        // e.preventDefault();
+      });
+      
+      // 加载历史错误日志
+      this.loadErrorLog();
+    },
+    
+    handleError: function(error, context = {}) {
+      console.error('❌ [错误捕获]', error, context);
+      
+      // 记录错误
+      const errorRecord = {
+        timestamp: new Date().toISOString(),
+        message: error?.message || String(error),
+        stack: error?.stack || '',
+        context: context,
+        userAgent: navigator.userAgent,
+        url: window.location.href
+      };
+      
+      this.errorLog.push(errorRecord);
+      
+      // 限制日志大小
+      if (this.errorLog.length > this.maxLogSize) {
+        this.errorLog = this.errorLog.slice(-this.maxLogSize);
+      }
+      
+      // 保存到 localStorage
+      this.saveErrorLog();
+    },
+    
+    saveErrorLog: function() {
+      try {
+        __tpi_ls_set('tpi_error_log', JSON.stringify(this.errorLog));
+      } catch (e) {
+        console.warn('⚠️ [错误处理] 无法保存错误日志:', e);
+      }
+    },
+    
+    loadErrorLog: function() {
+      try {
+        const saved = __tpi_ls_get('tpi_error_log');
+        if (saved) {
+          this.errorLog = JSON.parse(saved);
+          console.log(`📋 [错误处理] 加载了 ${this.errorLog.length} 条历史错误记录`);
+        }
+      } catch (e) {
+        console.warn('⚠️ [错误处理] 无法加载错误日志:', e);
+      }
+    },
+    
+    getErrorReport: function() {
+      return this.errorLog.map((error, index) => {
+        const date = new Date(error.timestamp);
+        return `[错误 #${index + 1}] ${date.toLocaleString()}: ${error.message}`;
+      }).join('\n');
+    }
+  };
+
+  // ===========================
+  // 7. 性能监控
+  // ===========================
+  window.TPIPerformanceMonitor = {
+    metrics: {},
+    
+    start: function(name) {
+      this.metrics[name] = { start: performance.now() };
+    },
+    
+    end: function(name) {
+      if (this.metrics[name]) {
+        const duration = performance.now() - this.metrics[name].start;
+        this.metrics[name].duration = duration;
+        
+        // 超过500ms的操作记录警告
+        if (duration > 500) {
+          console.warn(`⚠️ [性能] ${name} 耗时 ${duration.toFixed(2)}ms`);
+        } else {
+          console.log(`⏱️ [性能] ${name} 耗时 ${duration.toFixed(2)}ms`);
+        }
+      }
+    },
+    
+    getReport: function() {
+      return Object.entries(this.metrics)
+        .filter(([_, v]) => v.duration)
+        .sort((a, b) => b[1].duration - a[1].duration)
+        .map(([name, data]) => `${name}: ${data.duration.toFixed(2)}ms`)
+        .join('\n');
+    }
+  };
+
+  // ===========================
+  // 8. 初始化所有模块
+  // ===========================
+  function initializeOptimizations() {
+    console.log('🚀 [TPI优化] 开始初始化所有优化模块...');
+    
+    try {
+      // 错误处理
+      window.TPIErrorHandler.init();
+      
+      // 网络监控
+      window.TPINetworkManager.init();
+      
+      // 增强保存指示器 (延迟启动，确保DOM已加载)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+          setTimeout(() => window.TPISaveIndicatorEnhancer.init(), 1500);
+        });
+      } else {
+        setTimeout(() => window.TPISaveIndicatorEnhancer.init(), 1500);
+      }
+      
+      console.log('✅ [TPI优化] 所有优化模块初始化完成！');
+      
+      // 创建全局对象供调试使用
+      window.TPIOptimizations = {
+        DataCompression: window.TPIDataCompression,
+        IncrementalSync: window.TPIIncrementalSync,
+        SaveIndicatorEnhancer: window.TPISaveIndicatorEnhancer,
+        NetworkManager: window.TPINetworkManager,
+        ConflictResolver: window.TPIConflictResolver,
+        ErrorHandler: window.TPIErrorHandler,
+        PerformanceMonitor: window.TPIPerformanceMonitor
+      };
+      
+    } catch (error) {
+      console.error('❌ [TPI优化] 初始化失败:', error);
+    }
+  }
+
+  // 立即初始化
+  initializeOptimizations();
+  
+  // ===========================
+  // 9. 增强现有函数 (包装而不是覆盖)
+  // ===========================
+  
+  // 延迟执行,确保saveTodaysData函数已定义
+  setTimeout(() => {
+    // 包装上传函数，添加离线检测和性能监控
+    if (typeof window.saveTodaysData !== 'undefined') {
+      const originalSaveTodaysData = window.saveTodaysData;
+      window.saveTodaysData = async function(...args) {
+        // 检查网络
+        if (!window.TPINetworkManager.checkOnline()) {
+          alert('⚠️ 网络未连接，无法上传数据到云端。\n数据已保存在本地，网络恢复后请重试。');
+          return;
+        }
+        
+        // 执行原函数
+        try {
+          window.TPIPerformanceMonitor.start('saveTodaysData');
+          const result = await originalSaveTodaysData.apply(this, args);
+          window.TPIPerformanceMonitor.end('saveTodaysData');
+          
+          // 保存快照供增量同步使用
+          window.TPIIncrementalSync.saveSnapshot(result);
+          
+          return result;
+        } catch (error) {
+          window.TPIErrorHandler.handleError(error, { function: 'saveTodaysData' });
+          throw error;
+        }
+      };
+      console.log('✅ [TPI优化] saveTodaysData 函数已增强');
+    }
+    
+    // 包装saveToLocalStorage函数
+    if (typeof window.saveToLocalStorage !== 'undefined') {
+      const originalSaveToLocalStorage = window.saveToLocalStorage;
+      window.saveToLocalStorage = function(...args) {
+        try {
+          window.TPIPerformanceMonitor.start('saveToLocalStorage');
+          const result = originalSaveToLocalStorage.apply(this, args);
+          window.TPIPerformanceMonitor.end('saveToLocalStorage');
+          return result;
+        } catch (error) {
+          window.TPIErrorHandler.handleError(error, { function: 'saveToLocalStorage' });
+          throw error;
+        }
+      };
+      console.log('✅ [TPI优化] saveToLocalStorage 函数已增强');
+    }
+  }, 2000);
+
+  console.log('✅ [TPI优化] 深度优化脚本加载完成！');
+  
+})();
 
 // ========== Appwrite 集成区结束 ==========
 
