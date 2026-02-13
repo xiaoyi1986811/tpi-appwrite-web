@@ -4779,7 +4779,7 @@ window.exportAsCSV = function() {
 
       <div style="font-weight:700; color:#111827;">👤 已登录: <span id="tpi-current-user"></span></div>
       <button type="button" onclick="tpiSaveToday()" style="padding:12px 20px; background: linear-gradient(135deg,#3b82f6,#2563eb); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-        ⬆️ 同步所选日期到云端
+        ⬆️ 同步上传所选日期到云端
       </button>
       <button type="button" onclick="tpiLoadToday()" style="padding:12px 20px; background: linear-gradient(135deg,#06b6d4,#0891b2); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
         ⬇️ 从云端下载所选日期数据
@@ -30046,7 +30046,7 @@ try{
   // ⚠️ TODO: 请替换为你的 Appwrite 配置
   const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
   const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
-  const APPWRITE_DATABASE_ID = 'tpi_database'; // 数据库 ID
+  const APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // 数据库 ID
   const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
 
   // 初始化 Appwrite 客户端
@@ -30207,7 +30207,7 @@ window.__tpi_syncDateToMain = function(){
     const username = (document.getElementById('tpi-username')?.value || '').trim();
     const password = (document.getElementById('tpi-password')?.value || '');
     if (!username || !password) { tpiShowMsg('tpi-login-msg', '❌ 邮箱和密码不能为空', true); return; }
-    if (password.length < 8) { tpiShowMsg('tpi-login-msg', '❌ 密码至少 8 位', true); return; }
+    if (password.length < 6) { tpiShowMsg('tpi-login-msg', '❌ 密码至少 6 位', true); return; }
 
     // 验证邮箱格式
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -30218,9 +30218,10 @@ window.__tpi_syncDateToMain = function(){
 
     tpiShowMsg('tpi-login-msg', '⏳ 正在注册...');
     try{
-      // 生成唯一的用户 ID（使用 Appwrite 官方 ID 生成器，避免 400 输入不合法）
-      const userId = Appwrite.ID.unique();
-// 调用 Appwrite 注册 API
+      // 生成唯一的用户 ID
+      const userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+      
+      // 调用 Appwrite 注册 API
       const response = await account.create(
         userId,
         username,
@@ -30548,7 +30549,7 @@ var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwri
 var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
 // 数据库和集合 ID (需与你在 Appwrite 控制台创建的一致)
-const DATABASE_ID = 'tpi_database';
+const DATABASE_ID = '698dad1c0013e7c982fe';
 const COLLECTION_ID = 'daily_records';
 
 
@@ -30852,7 +30853,7 @@ var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.
 
 var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
 var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
-const DB_ID = 'tpi_database';
+const DB_ID = '698dad1c0013e7c982fe';
 const COL_ID = 'daily_records';
 
 // 2. 页面加载时检查登录状态
