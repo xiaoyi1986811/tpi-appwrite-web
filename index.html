@@ -29801,6 +29801,12 @@ window.__tpi_syncDateToMain = function(){
 
   window.tpiLoadToday = async function () {
     try{
+      // ✅ 兼容：某些构建/脚本作用域下 DATABASE_ID/COLLECTION_ID 可能不可见，这里统一从 window/常量中取值
+      const __DB_ID = (typeof DATABASE_ID !== 'undefined' ? DATABASE_ID : (window.DATABASE_ID || window.APPWRITE_DATABASE_ID));
+      const __COL_ID = (typeof COLLECTION_ID !== 'undefined' ? COLLECTION_ID : (window.COLLECTION_ID || window.APPWRITE_COLLECTION_ID));
+      if(!__DB_ID || !__COL_ID){
+        throw new Error('DATABASE_ID/COLLECTION_ID 未配置：请检查 Appwrite 配置区');
+      }
     console.log('📥 ═════════════════════════════════════════════════════');
     console.log('📥 [云同步] 开始下载数据...');
     const __download_start_time = Date.now();
@@ -29833,10 +29839,10 @@ window.__tpi_syncDateToMain = function(){
       }
 
       // 先清空再恢复，避免“残留旧值”导致差异
-      const beforeKeys = localStorage.length;
-      localStorage.clear();
+      const beforeKeys = __tpi_ls_length(0);
+      __tpi_ls_clear();
       for(const [k,v] of Object.entries(payload)){
-        localStorage.setItem(k, v);
+        __tpi_ls_set(k, v);
       }
       console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
