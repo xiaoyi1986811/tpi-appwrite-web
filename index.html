@@ -29692,6 +29692,115 @@ window.__tpi_syncDateToMain = function(){
     const safeUser = String(userId||'').replace(/[^a-zA-Z0-9_\-]/g,'_');
     const safeDate = String(dateStr||'').replace(/[^0-9\-]/g,'_');
     return `${safeUser}_${safeDate}`;
+
+  // ---------- 2.1) 额外：全页面表单快照（用于补足 collectFormData 未覆盖的字段） ----------
+  function __tpi_collectDomSnapshot(){
+    const snap = { v: 1, at: Date.now(), items: {} };
+    const nodes = document.querySelectorAll('input, select, textarea');
+    nodes.forEach(el=>{
+      try{
+        const tag = (el.tagName||'').toLowerCase();
+        const type = (el.getAttribute('type')||'').toLowerCase();
+        const id = el.id ? `id:${el.id}` : '';
+        const name = (!id && el.name) ? `name:${el.name}` : '';
+        const key = id || name;
+        if(!key) return;
+
+        // 跳过密码框，避免把密码同步到云端
+        if(tag==='input' && type==='password') return;
+
+        let val;
+        if(tag==='input' && (type==='checkbox' || type==='radio')){
+          val = { t: type, c: !!el.checked, v: el.value ?? '' };
+        }else{
+          val = { t: tag, v: el.value ?? '' };
+        }
+        snap.items[key] = val;
+      }catch(e){}
+    });
+    return snap;
+  }
+
+  function __tpi_applyDomSnapshot(snap){
+    if(!snap || !snap.items) return;
+    const items = snap.items;
+    Object.keys(items).forEach(k=>{
+      const it = items[k];
+      let el = null;
+      try{
+        if(k.startsWith('id:')){
+          el = document.getElementById(k.slice(3));
+        }else if(k.startsWith('name:')){
+          const name = k.slice(5);
+          // radio 可能多个，优先匹配 value
+          if(it && it.t==='radio'){
+            const radios = document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
+            radios.forEach(r=>{
+              if(String(r.value??'') === String(it.v??'')) r.checked = !!it.c;
+            });
+            return;
+          }
+          el = document.querySelector(`[name="${CSS.escape(name)}"]`);
+        }
+        if(!el) return;
+
+        const tag = (el.tagName||'').toLowerCase();
+        const type = (el.getAttribute('type')||'').toLowerCase();
+
+        if(tag==='input' && type==='checkbox'){
+          el.checked = !!it.c;
+        }else if(tag==='input' && type==='radio'){
+          el.checked = !!it.c;
+        }else{
+          el.value = (it.v ?? '');
+        }
+        // 尽量触发依赖逻辑（实时计分/联动 UI）
+        try{ el.dispatchEvent(new Event('input', {bubbles:true})); }catch(e){}
+        try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
+      }catch(e){}
+    });
+  }
+
+  // payload schema:
+  // - 旧版：{ [lsKey]: lsValue, ... }
+  // - 新版：{ __schema:'tpi_cloud_v2', __ls:{...}, __dom:{...}, __meta:{...} }
+  function __tpi_packCloudPayload(){
+    // 1) localStorage 全量
+    const ls = {};
+    const n = __tpi_ls_length(0);
+    for(let i=0;i<n;i++){
+      const k = __tpi_ls_key(i);
+      if(!k) continue;
+      ls[k] = __tpi_ls_get(k);
+    }
+
+    // 2) DOM 快照（补足本地结构化数据可能漏字段）
+    const dom = __tpi_collectDomSnapshot();
+
+    return {
+      __schema: 'tpi_cloud_v2',
+      __meta: {
+        at: Date.now(),
+        ua: navigator.userAgent || '',
+        href: location.href || ''
+      },
+      __dom: dom,
+      __ls: ls
+    };
+  }
+
+  function __tpi_unpackCloudPayload(raw){
+    // raw 可以是对象或 JSON 字符串
+    let obj = raw;
+    if(typeof raw === 'string'){
+      obj = JSON.parse(raw || '{}');
+    }
+    if(obj && obj.__schema === 'tpi_cloud_v2' && obj.__ls){
+      return { ls: obj.__ls || {}, dom: obj.__dom || null, meta: obj.__meta || {} };
+    }
+    // 旧版兼容：把对象本身当作 ls map
+    return { ls: (obj && typeof obj === 'object') ? obj : {}, dom: null, meta: {} };
+  }
   }
 
   window.tpiSaveToday = async function () {
@@ -29720,14 +29829,11 @@ window.__tpi_syncDateToMain = function(){
         try{ saveToLocalStorage(); }catch(e){ console.warn('[云同步] saveToLocalStorage 调用失败(忽略):', e); }
       }
 
-      // 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
-      console.log('📦 [上传] 正在打包 localStorage 数据...');
-      const payload = {};
-      for(let i=0;i<localStorage.length;i++){
-        const k = localStorage.key(i);
-        payload[k] = localStorage.getItem(k);
-      }
-      const dataStr = JSON.stringify(payload);
+      // 2) 打包上传数据（云端必须“完整可还原”）：localStorage 全量 + DOM 快照（补足结构化数据可能漏字段）
+      console.log('📦 [上传] 正在打包数据(localStorage + DOM快照)...');
+      const payloadObj = __tpi_packCloudPayload();
+      const payload = payloadObj.__ls || {};
+      const dataStr = JSON.stringify(payloadObj);
       console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`);
 
       // 3) 写入 Appwrite（字段必须匹配：data(longtext string) + userId + date）
@@ -29826,19 +29932,23 @@ window.__tpi_syncDateToMain = function(){
 
       const doc = await databases.getDocument(__DB_ID, __COL_ID, docId);
 
-      // 解析云端 data
+      // 解析云端 data（兼容旧版/新版 schema）
       let payload = {};
+      let domSnap = null;
       console.log(`📦 [下载] 文档数据大小: ${doc.data ? doc.data.length : 0} 字节`);
       try{
-        payload = JSON.parse(doc.data || '{}');
-        console.log(`✅ [下载] JSON解析成功`);
-        console.log(`📊 [下载] 数据结构分析: ${Object.keys(payload).length} 个字段`);
+        const unpack = __tpi_unpackCloudPayload(doc.data || '{}');
+        payload = unpack.ls || {};
+        domSnap = unpack.dom || null;
+        console.log('✅ [下载] JSON解析成功');
+        console.log(`📊 [下载] localStorage 字段数: ${Object.keys(payload).length}`);
+        console.log(`🧩 [下载] DOM快照字段数: ${domSnap && domSnap.items ? Object.keys(domSnap.items).length : 0}`);
       }catch(e){
         console.error('❌ [下载] JSON解析失败:', e);
         throw new Error('云端数据解析失败（data 不是有效 JSON 字符串）');
       }
 
-      // 先清空再恢复，避免“残留旧值”导致差异
+// 先清空再恢复，避免“残留旧值”导致差异
       const beforeKeys = __tpi_ls_length(0);
       __tpi_ls_clear();
       for(const [k,v] of Object.entries(payload)){
@@ -29846,12 +29956,23 @@ window.__tpi_syncDateToMain = function(){
       }
       console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
+      // 可选：如果云端包含 DOM 快照，先直接恢复到页面控件（补足结构化恢复遗漏）
+      if(domSnap && domSnap.items){
+        try{ __tpi_applyDomSnapshot(domSnap); console.log(`✅ [下载] DOM快照已应用 (${Object.keys(domSnap.items).length} 项)`); }catch(e){ console.warn('[云同步] DOM快照应用失败(忽略):', e); }
+      }
+
       // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
       if(typeof loadFromLocalStorage === 'function'){
         try{ 
           loadFromLocalStorage(); 
           console.log('✅ [下载] UI恢复完成 (loadFromLocalStorage)');
+          // 再额外强制触发一次全量重算/刷新（防止某些模块仅在交互时更新）
+          try{ if(typeof calculateAllScores === 'function'){ calculateAllScores(); console.log('🔄 [下载] 已强制重算 calculateAllScores()'); } }catch(e){}
+          try{ if(typeof updateAllDisplays === 'function'){ updateAllDisplays(); console.log('🔄 [下载] 已调用 updateAllDisplays()'); } }catch(e){}
+          try{ if(typeof updateScoreboard === 'function'){ updateScoreboard(); } }catch(e){}
+          try{ if(typeof updateTPIDashboard === 'function'){ updateTPIDashboard(); } }catch(e){}
+
         }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
       }else{
         // 兜底：刷新页面（保证 UI 和 localStorage 一致）
