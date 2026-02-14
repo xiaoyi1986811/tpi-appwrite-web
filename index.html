@@ -3,812 +3,6 @@
 <html lang="zh-CN">
 <head>
 <script>
-// ===================================================================
-// 配置常量 (优化13: 消除魔法数字)
-// ===================================================================
-const CONFIG = {
-    // Appwrite配置
-    APPWRITE: {
-        ENDPOINT: 'https://cloud.appwrite.io/v1',
-        // PROJECT_ID, DATABASE_ID等由实际配置提供
-    },
-    
-    // 分数配置
-    SCORES: {
-        WAKE_UP_EARLY: 10,      // 早起分数
-        STUDY_HOUR: 5,          // 每小时学习分数
-        EXERCISE: 15,           // 运动分数
-        READING: 8,             // 阅读分数
-        MAX_DAILY_SCORE: 100,   // 每日最高分
-    },
-    
-    // 评级阈值
-    RATINGS: {
-        S_PLUS: 156,    // S+评级
-        S: 120,         // S评级
-        A: 95,          // A评级 (稳健线)
-        B: 70,          // B评级
-        C: 50,          // C评级
-        D: 0            // D评级
-    },
-    
-    // 时间配置
-    TIME: {
-        AUTO_SAVE_INTERVAL: 30000,      // 自动保存间隔(ms)
-        SYNC_RETRY_DELAY: 1000,         // 同步重试延迟
-        MAX_RETRIES: 3,                 // 最大重试次数
-        DEBOUNCE_DELAY: 300,            // 防抖延迟(ms) - 谨慎使用
-    },
-    
-    // UI配置
-    UI: {
-        ANIMATION_DURATION: 300,        // 动画时长(ms)
-        TOAST_DISPLAY_TIME: 3000,       // 提示显示时长(ms)
-    },
-    
-    // 缓存配置
-    CACHE: {
-        MAX_HISTORY_DAYS: 30,          // 最大缓存天数
-        MAX_QUEUE_SIZE: 50,            // 最大队列大小
-    }
-};
-
-
-// ===================================================================
-// 敏感数据加密提示 (优化10)
-// ===================================================================
-// TODO: 对于敏感数据(如密码、token),建议使用以下加密方法:
-// 1. 使用Web Crypto API进行加密
-// 2. 不在localStorage中存储明文密码
-// 3. 使用sessionStorage代替localStorage存储临时敏感数据
-// 示例: 
-// const encrypted = await crypto.subtle.encrypt(algorithm, key, data);
-// ===================================================================
-
-
-
-// ===================================================================
-// DOM缓存系统 (优化6: 减少DOM操作频率)
-// ===================================================================
-const DOMCache = {
-    cache: new Map(),
-    
-    get(id) {
-        if (!this.cache.has(id)) {
-            const element = document.getElementById(id);
-            if (element) {
-                this.cache.set(id, element);
-            }
-        }
-        return this.cache.get(id) || null;
-    },
-    
-    clear() {
-        this.cache.clear();
-    },
-    
-    refresh(id) {
-        this.cache.delete(id);
-        return this.get(id);
-    }
-};
-
-// 全局快捷访问
-window.dom = DOMCache;
-
-// ===================================================================
-// 云端同步管理器 (优化2: 增强云端同步可靠性)
-// ===================================================================
-class CloudSyncManager {
-    constructor() {
-        this.maxRetries = CONFIG.TIME.MAX_RETRIES || 3;
-        this.retryDelay = CONFIG.TIME.SYNC_RETRY_DELAY || 1000;
-        this.syncQueue = [];
-        this.isSyncing = false;
-    }
-    
-    async uploadWithRetry(data, retryCount = 0) {
-        try {
-            // 添加时间戳和版本号
-            const syncData = {
-                ...data,
-                lastModified: new Date().toISOString(),
-                version: Date.now(),
-                deviceId: this.getDeviceId()
-            };
-            
-            // 调用Appwrite上传函数
-            if (window.uploadToAppwrite && typeof window.uploadToAppwrite === 'function') {
-                const result = await window.uploadToAppwrite(syncData);
-                this.showSuccess('✅ 数据已同步到云端');
-                return result;
-            } else {
-                throw new Error('Appwrite云端同步函数未初始化');
-            }
-            
-        } catch (error) {
-            console.error('云端同步失败:', error);
-            
-            // 重试逻辑
-            if (retryCount < this.maxRetries) {
-                this.showWarning(`⏳ 同步失败,${this.retryDelay/1000}秒后重试...`);
-                await this.sleep(this.retryDelay);
-                return this.uploadWithRetry(data, retryCount + 1);
-            } else {
-                // 重试失败,加入队列
-                this.syncQueue.push(data);
-                this.showError('❌ 同步失败,数据已保存到本地队列');
-                return null;
-            }
-        }
-    }
-    
-    async processSyncQueue() {
-        if (this.syncQueue.length === 0 || this.isSyncing) return;
-        
-        this.isSyncing = true;
-        this.showInfo(`🔄 正在同步 ${this.syncQueue.length} 条离线数据...`);
-        
-        const failedItems = [];
-        for (const data of this.syncQueue) {
-            const result = await this.uploadWithRetry(data);
-            if (!result) {
-                failedItems.push(data);
-            }
-        }
-        
-        this.syncQueue = failedItems;
-        this.isSyncing = false;
-        
-        if (this.syncQueue.length === 0) {
-            this.showSuccess('✅ 所有离线数据已同步');
-        }
-    }
-    
-    getDeviceId() {
-        let deviceId = __tpi_ls_get('deviceId');
-        if (!deviceId) {
-            deviceId = 'device_' + Math.random().toString(36).substr(2, 9);
-            __tpi_ls_set('deviceId', deviceId);
-        }
-        return deviceId;
-    }
-    
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-    
-    showSuccess(msg) {
-        if (window.showNotification) window.showNotification(msg, 'success');
-    }
-    
-    showWarning(msg) {
-        if (window.showNotification) window.showNotification(msg, 'warning');
-    }
-    
-    showError(msg) {
-        if (window.showNotification) window.showNotification(msg, 'error');
-    }
-    
-    showInfo(msg) {
-        if (window.showNotification) window.showNotification(msg, 'info');
-    }
-}
-
-// 全局实例
-window.cloudSyncManager = new CloudSyncManager();
-
-// 网络恢复时自动同步队列
-window.addEventListener('online', () => {
-    if (window.cloudSyncManager) {
-        window.cloudSyncManager.processSyncQueue();
-    }
-});
-
-// ===================================================================
-// 历史数据缓存管理器 (优化3: 优化跨日期对比性能)
-// ===================================================================
-class HistoryDataCache {
-    constructor() {
-        this.cache = new Map();
-        this.maxCacheSize = CONFIG.CACHE.MAX_HISTORY_DAYS || 30;
-    }
-    
-    async loadRecentDays(days = 7) {
-        const today = new Date();
-        const promises = [];
-        
-        for (let i = 0; i < days; i++) {
-            const date = new Date(today);
-            date.setDate(date.getDate() - i);
-            const dateStr = this.formatDate(date);
-            
-            if (!this.cache.has(dateStr)) {
-                promises.push(this.loadDayData(dateStr));
-            }
-        }
-        
-        await Promise.all(promises);
-    }
-    
-    async loadDayData(dateStr) {
-        try {
-            // 先查本地
-            const localData = __tpi_ls_get(`tpi_data_${dateStr}`);
-            if (localData) {
-                this.cache.set(dateStr, JSON.parse(localData));
-                return JSON.parse(localData);
-            }
-            
-            // 查询Appwrite云端数据
-            if (window.downloadFromAppwrite && typeof window.downloadFromAppwrite === 'function') {
-                const cloudData = await window.downloadFromAppwrite(dateStr);
-                if (cloudData) {
-                    this.cache.set(dateStr, cloudData);
-                    this.limitCacheSize();
-                    return cloudData;
-                }
-            }
-        } catch (error) {
-            console.error(`加载${dateStr}数据失败:`, error);
-        }
-        return null;
-    }
-    
-    get(dateStr) {
-        return this.cache.get(dateStr) || null;
-    }
-    
-    set(dateStr, data) {
-        this.cache.set(dateStr, data);
-        this.limitCacheSize();
-    }
-    
-    limitCacheSize() {
-        if (this.cache.size > this.maxCacheSize) {
-            const firstKey = this.cache.keys().next().value;
-            this.cache.delete(firstKey);
-        }
-    }
-    
-    formatDate(date) {
-        return date.toISOString().split('T')[0];
-    }
-    
-    clear() {
-        this.cache.clear();
-    }
-}
-
-// 全局实例
-window.historyCache = new HistoryDataCache();
-
-// ===================================================================
-// 实时评分更新系统 (优化1: 确保实时性,不使用防抖)
-// ===================================================================
-class ScoreUpdateManager {
-    constructor() {
-        this.listeners = new Set();
-        this.isInitialized = false;
-    }
-    
-    registerScoreElements() {
-        if (this.isInitialized) return;
-        
-        const scoreRelatedElements = document.querySelectorAll(
-            'input[type="checkbox"], input[type="radio"], ' +
-            'input[type="number"], input[type="time"], ' +
-            'select, textarea'
-        );
-        
-        scoreRelatedElements.forEach(element => {
-            // 使用change事件立即更新,不防抖
-            element.addEventListener('change', () => this.triggerUpdate());
-            
-            // input事件也立即更新(针对数字输入)
-            if (element.type === 'number') {
-                element.addEventListener('input', () => this.triggerUpdate());
-            }
-        });
-        
-        this.isInitialized = true;
-        console.info('[评分系统] 实时更新监听已注册');
-    }
-    
-    triggerUpdate() {
-        try {
-            // 立即更新所有分数,不延迟
-            this.updateAllScores();
-            this.updateTotalScore();
-            this.updateRating();
-            
-            // 可选: 自动保存到本地
-            if (window.autoSaveFormData && typeof window.autoSaveFormData === 'function') {
-                window.autoSaveFormData();
-            }
-        } catch (error) {
-            console.error('[评分系统] 更新失败:', error);
-        }
-    }
-    
-    updateAllScores() {
-        // 调用各模块的评分更新函数
-        if (typeof updateMorningScore === 'function') updateMorningScore();
-        if (typeof updateAfternoonScore === 'function') updateAfternoonScore();
-        if (typeof updateEveningScore === 'function') updateEveningScore();
-        if (typeof updateNightScore === 'function') updateNightScore();
-        if (typeof calculateAllScores === 'function') calculateAllScores();
-    }
-    
-    updateTotalScore() {
-        if (typeof calculateTotalScore === 'function') {
-            const total = calculateTotalScore();
-            const totalElement = dom.get('total-score') || document.getElementById('total-score');
-            if (totalElement) {
-                totalElement.textContent = total;
-            }
-        }
-    }
-    
-    updateRating() {
-        if (typeof calculateTotalScore === 'function' && typeof getRatingByScore === 'function') {
-            const total = calculateTotalScore();
-            const rating = getRatingByScore(total);
-            const ratingElement = dom.get('rating-display') || document.getElementById('rating-display');
-            if (ratingElement) {
-                ratingElement.textContent = rating;
-            }
-        }
-    }
-}
-
-// 全局实例
-window.scoreUpdateManager = new ScoreUpdateManager();
-
-
-// ===================================================================
-// 模块折叠状态持久化 (优化4)
-// ===================================================================
-class CollapseStateManager {
-    constructor() {
-        this.storageKey = 'tpi_collapse_states';
-    }
-    
-    saveState(cardId, isCollapsed) {
-        const states = this.loadAllStates();
-        states[cardId] = isCollapsed;
-        __tpi_ls_set(this.storageKey, JSON.stringify(states));
-    }
-    
-    loadState(cardId) {
-        const states = this.loadAllStates();
-        return states[cardId] !== undefined ? states[cardId] : false;
-    }
-    
-    loadAllStates() {
-        try {
-            const statesStr = __tpi_ls_get(this.storageKey);
-            return statesStr ? JSON.parse(statesStr) : {};
-        } catch (error) {
-            console.error('[折叠状态] 加载失败:', error);
-            return {};
-        }
-    }
-    
-    restoreAllStates() {
-        const cards = document.querySelectorAll('.card[id]');
-        cards.forEach(card => {
-            const cardId = card.id;
-            const isCollapsed = this.loadState(cardId);
-            
-            if (isCollapsed) {
-                const content = card.querySelector('.card-content');
-                if (content) {
-                    content.style.display = 'none';
-                    card.classList.add('collapsed');
-                }
-            }
-        });
-    }
-}
-
-// 全局实例
-window.collapseStateManager = new CollapseStateManager();
-
-
-// ===================================================================
-// 每日签到增强系统 (优化5)
-// ===================================================================
-class CheckInManager {
-    constructor() {
-        this.storageKey = 'tpi_checkin_records';
-        this.todayKey = this.getTodayKey();
-    }
-    
-    getTodayKey() {
-        const today = new Date();
-        return today.toISOString().split('T')[0];
-    }
-    
-    hasCheckedInToday() {
-        const records = this.loadRecords();
-        return records[this.todayKey] !== undefined;
-    }
-    
-    checkIn(data = {}) {
-        if (this.hasCheckedInToday()) {
-            if (window.showNotification) {
-                window.showNotification('✅ 今日已签到', 'info');
-            }
-            return false;
-        }
-        
-        const records = this.loadRecords();
-        records[this.todayKey] = {
-            timestamp: new Date().toISOString(),
-            ...data
-        };
-        
-        __tpi_ls_set(this.storageKey, JSON.stringify(records));
-        
-        // 显示签到成功消息
-        const consecutiveDays = this.getConsecutiveDays();
-        if (window.showNotification) {
-            window.showNotification(
-                `✅ 签到成功! 已连续签到 ${consecutiveDays} 天`,
-                'success'
-            );
-        }
-        
-        // 检查里程碑
-        this.checkMilestones(consecutiveDays);
-        
-        return true;
-    }
-    
-    loadRecords() {
-        try {
-            const recordsStr = __tpi_ls_get(this.storageKey);
-            return recordsStr ? JSON.parse(recordsStr) : {};
-        } catch (error) {
-            console.error('[签到系统] 加载失败:', error);
-            return {};
-        }
-    }
-    
-    getConsecutiveDays() {
-        const records = this.loadRecords();
-        const dates = Object.keys(records).sort().reverse();
-        
-        let consecutive = 0;
-        let currentDate = new Date();
-        
-        for (const dateStr of dates) {
-            const recordDate = new Date(dateStr);
-            const diffDays = Math.floor((currentDate - recordDate) / (1000 * 60 * 60 * 24));
-            
-            if (diffDays === consecutive) {
-                consecutive++;
-            } else {
-                break;
-            }
-        }
-        
-        return consecutive;
-    }
-    
-    checkMilestones(consecutiveDays) {
-        const milestones = [7, 30, 60, 100, 365];
-        
-        if (milestones.includes(consecutiveDays)) {
-            if (window.showNotification) {
-                window.showNotification(
-                    `🎉 恭喜! 达成 ${consecutiveDays} 天连续签到里程碑!`,
-                    'success'
-                );
-            }
-        }
-    }
-    
-    getTotalDays() {
-        const records = this.loadRecords();
-        return Object.keys(records).length;
-    }
-    
-    getCheckInStats() {
-        return {
-            totalDays: this.getTotalDays(),
-            consecutiveDays: this.getConsecutiveDays(),
-            hasCheckedInToday: this.hasCheckedInToday()
-        };
-    }
-}
-
-// 全局实例
-window.checkInManager = new CheckInManager();
-
-
-// ===================================================================
-// 批量DOM更新优化 (优化7)
-// ===================================================================
-class BatchUpdateManager {
-    constructor() {
-        this.updateQueue = [];
-        this.isProcessing = false;
-    }
-    
-    /**
-     * 批量更新DOM元素
-     * @param {Array} updates - 更新列表 [{id, property, value}]
-     */
-    batchUpdate(updates) {
-        this.updateQueue.push(...updates);
-        
-        if (!this.isProcessing) {
-            this.processQueue();
-        }
-    }
-    
-    processQueue() {
-        if (this.updateQueue.length === 0) {
-            this.isProcessing = false;
-            return;
-        }
-        
-        this.isProcessing = true;
-        
-        // 使用requestAnimationFrame确保在下一次重绘前更新
-        requestAnimationFrame(() => {
-            // 创建文档片段,减少重排
-            const updates = [...this.updateQueue];
-            this.updateQueue = [];
-            
-            updates.forEach(update => {
-                const element = dom.get(update.id) || document.getElementById(update.id);
-                if (element) {
-                    if (update.property === 'textContent') {
-                        element.textContent = update.value;
-                    } else if (update.property === 'innerHTML') {
-                        element.innerHTML = update.value;
-                    } else if (update.property === 'value') {
-                        element.value = update.value;
-                    } else if (update.property === 'class') {
-                        if (update.action === 'add') {
-                            element.classList.add(update.value);
-                        } else if (update.action === 'remove') {
-                            element.classList.remove(update.value);
-                        }
-                    } else if (update.property === 'style') {
-                        Object.assign(element.style, update.value);
-                    }
-                }
-            });
-            
-            this.processQueue();
-        });
-    }
-    
-    /**
-     * 批量更新分数显示
-     * @param {Object} scores - 分数对象
-     */
-    updateScoreDisplay(scores) {
-        const updates = [];
-        
-        if (scores.morning !== undefined) {
-            updates.push({id: 'morning-score', property: 'textContent', value: scores.morning});
-        }
-        if (scores.afternoon !== undefined) {
-            updates.push({id: 'afternoon-score', property: 'textContent', value: scores.afternoon});
-        }
-        if (scores.evening !== undefined) {
-            updates.push({id: 'evening-score', property: 'textContent', value: scores.evening});
-        }
-        if (scores.night !== undefined) {
-            updates.push({id: 'night-score', property: 'textContent', value: scores.night});
-        }
-        if (scores.total !== undefined) {
-            updates.push({id: 'total-score', property: 'textContent', value: scores.total});
-        }
-        if (scores.rating !== undefined) {
-            updates.push({id: 'rating-display', property: 'textContent', value: scores.rating});
-        }
-        
-        this.batchUpdate(updates);
-    }
-}
-
-// 全局实例
-window.batchUpdateManager = new BatchUpdateManager();
-
-
-// ===================================================================
-// 自动保存增强 (附加优化)
-// ===================================================================
-class AutoSaveManager {
-    constructor() {
-        this.saveInterval = CONFIG.TIME.AUTO_SAVE_INTERVAL || 30000;
-        this.timer = null;
-        this.lastSaveTime = 0;
-        this.hasUnsavedChanges = false;
-    }
-    
-    start() {
-        this.stop(); // 先停止之前的定时器
-        
-        this.timer = setInterval(() => {
-            if (this.hasUnsavedChanges) {
-                this.performSave();
-            }
-        }, this.saveInterval);
-        
-        // 监听输入变化
-        this.attachListeners();
-    }
-    
-    stop() {
-        if (this.timer) {
-            clearInterval(this.timer);
-            this.timer = null;
-        }
-    }
-    
-    attachListeners() {
-        const inputs = document.querySelectorAll('input, select, textarea');
-        inputs.forEach(input => {
-            input.addEventListener('change', () => {
-                this.hasUnsavedChanges = true;
-            });
-        });
-    }
-    
-    performSave() {
-        try {
-            // 调用实际的保存函数
-            if (window.saveFormData && typeof window.saveFormData === 'function') {
-                window.saveFormData();
-                this.hasUnsavedChanges = false;
-                this.lastSaveTime = Date.now();
-                console.info('[自动保存] 数据已保存');
-            } else if (window.collectDailyData && typeof window.collectDailyData === 'function') {
-                const data = window.collectDailyData();
-                const dateKey = Object.keys(data || {})[0];
-                if (dateKey) {
-                    __tpi_ls_set(`tpi_data_${dateKey}`, JSON.stringify(data[dateKey]));
-                    this.hasUnsavedChanges = false;
-                    this.lastSaveTime = Date.now();
-                    console.info('[自动保存] 数据已保存');
-                }
-            }
-        } catch (error) {
-            console.error('[自动保存] 失败:', error);
-        }
-    }
-    
-    forceSave() {
-        this.hasUnsavedChanges = true;
-        this.performSave();
-    }
-}
-
-// 全局实例
-window.autoSaveManager = new AutoSaveManager();
-
-
-// ===================================================================
-// 性能监控 (可选)
-// ===================================================================
-class PerformanceMonitor {
-    constructor() {
-        this.metrics = {};
-    }
-    
-    startTimer(name) {
-        this.metrics[name] = {
-            start: performance.now()
-        };
-    }
-    
-    endTimer(name) {
-        if (this.metrics[name]) {
-            this.metrics[name].end = performance.now();
-            this.metrics[name].duration = this.metrics[name].end - this.metrics[name].start;
-            
-            // 如果操作超过1秒,发出警告
-            if (this.metrics[name].duration > 1000) {
-                console.warn(`[性能] ${name} 耗时过长:`, this.metrics[name].duration.toFixed(2), 'ms');
-            }
-        }
-    }
-    
-    getMetric(name) {
-        return this.metrics[name];
-    }
-    
-    getAllMetrics() {
-        return this.metrics;
-    }
-    
-    clear() {
-        this.metrics = {};
-    }
-}
-
-// 全局实例
-window.performanceMonitor = new PerformanceMonitor();
-
-
-// 页面加载时启动自动保存
-window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        if (window.autoSaveManager) {
-            window.autoSaveManager.start();
-            console.info('[自动保存] 已启动,间隔:', CONFIG.TIME.AUTO_SAVE_INTERVAL / 1000, '秒');
-        }
-    }, 1000);
-});
-
-// 页面卸载前保存
-window.addEventListener('beforeunload', () => {
-    if (window.autoSaveManager && window.autoSaveManager.hasUnsavedChanges) {
-        window.autoSaveManager.forceSave();
-    }
-});
-
-
-
-// 页面加载时检查是否需要提醒签到
-window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        if (window.checkInManager && !window.checkInManager.hasCheckedInToday()) {
-            // 可选: 显示签到提醒
-            console.info('[签到系统] 今日尚未签到');
-        }
-    }, 2000);
-});
-
-
-// 页面加载时恢复折叠状态
-window.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => {
-        if (window.collapseStateManager) {
-            window.collapseStateManager.restoreAllStates();
-        }
-    }, 100);
-});
-
-// 增强原有的toggleCard函数,添加状态保存
-const originalToggleCard = window.toggleCard;
-if (originalToggleCard && typeof originalToggleCard === 'function') {
-    window.toggleCard = function(cardId) {
-        originalToggleCard(cardId);
-        
-        // 保存状态
-        const card = document.getElementById(cardId);
-        if (card && window.collapseStateManager) {
-            const isCollapsed = card.classList.contains('collapsed');
-            window.collapseStateManager.saveState(cardId, isCollapsed);
-        }
-    };
-}
-
-
-// 页面加载后初始化
-window.addEventListener('DOMContentLoaded', () => {
-    if (window.scoreUpdateManager) {
-        scoreUpdateManager.registerScoreElements();
-        scoreUpdateManager.triggerUpdate(); // 初始化显示
-    }
-});
-
-
-
-
-
-
-
-
-
 /* =========================================================
    V6 Final Stability Patch - Storage Safe Access (2026-02-11)
    - 仅提供辅助函数，不改写 localStorage 原型/方法
@@ -963,14 +157,15 @@ console.log('✅ 日期初始化脚本已加载');
 window.__tpi_legacy_exportAsJSON_1 = function () {
     // 云端为主模式：仅导出配置和设备ID
     const config = {
-        appwrite_endpoint: __tpi_ls_get('appwrite_endpoint') || '',
-        appwrite_project_id: __tpi_ls_get('appwrite_project_id') || '',
-        appwrite_database_id: __tpi_ls_get('appwrite_database_id') || '',
-        appwrite_collection_id: __tpi_ls_get('appwrite_collection_id') || '',
+        github_token: __tpi_ls_get('github_token') || '',
+        github_owner: __tpi_ls_get('github_owner') || '',
+        github_repo: __tpi_ls_get('github_repo') || '',
+        github_path: __tpi_ls_get('github_path') || '',
+        github_branch: __tpi_ls_get('github_branch') || '',
         tpi_device_id: __tpi_ls_get('tpi_device_id') || '',
         export_time: new Date().toISOString(),
         mode: 'cloud_first',
-        note: '云端为主模式：数据存储在Appwrite，本地仅保留配置'
+        note: '云端为主模式：数据存储在GitHub，本地仅保留配置'
     };
     
     const blob = new Blob(
@@ -1000,9 +195,9 @@ window.__tpi_legacy_saveTpiData_1 = function () {
             return;
         }
         
-        // 优先使用Appwrite云端上传
-        if (window.uploadToAppwrite && typeof window.uploadToAppwrite === 'function') {
-            window.uploadToAppwrite();
+        // 优先使用云端上传
+        if (window.uploadToGitHub && typeof window.uploadToGitHub === 'function') {
+            window.uploadToGitHub();
             return;
         }
         
@@ -1015,7 +210,7 @@ window.__tpi_legacy_saveTpiData_1 = function () {
         };
         __tpi_ls_set(`tpi_temp_snapshot_${dateKey}`, JSON.stringify(tempSnapshot));
         
-        alert('⚠️ Appwrite云端同步功能未就绪，已保存临时快照\n请稍后手动上传到云端');
+        alert('⚠️ 云端同步功能未就绪，已保存临时快照\n请稍后手动上传到云端');
         console.log('[临时快照] saved for', dateKey);
     } catch (e) {
         console.error('[SAVE] failed:', e);
@@ -1035,13 +230,14 @@ window.__tpi_legacy_loadTpiData_1 = function () {
         r.onload = () => {
             const config = JSON.parse(r.result);
             
-            // 云端为主模式：只恢复Appwrite配置项
-            if (config.appwrite_endpoint) __tpi_ls_set('appwrite_endpoint', config.appwrite_endpoint);
-            if (config.appwrite_project_id) __tpi_ls_set('appwrite_project_id', config.appwrite_project_id);
-            if (config.appwrite_database_id) __tpi_ls_set('appwrite_database_id', config.appwrite_database_id);
-            if (config.appwrite_collection_id) __tpi_ls_set('appwrite_collection_id', config.appwrite_collection_id);
+            // 云端为主模式：只恢复配置项
+            if (config.github_token) __tpi_ls_set('github_token', config.github_token);
+            if (config.github_owner) __tpi_ls_set('github_owner', config.github_owner);
+            if (config.github_repo) __tpi_ls_set('github_repo', config.github_repo);
+            if (config.github_path) __tpi_ls_set('github_path', config.github_path);
+            if (config.github_branch) __tpi_ls_set('github_branch', config.github_branch);
             
-            alert('✅ Appwrite配置已恢复，请刷新页面后从云端下载数据');
+            alert('✅ 配置已恢复，请刷新页面后从云端下载数据');
         };
         r.readAsText(file);
     };
@@ -1055,7 +251,7 @@ window.__tpi_legacy_loadTpiData_1 = function () {
    - JSON：完整快照（可精确复现）
    - Markdown：可读摘要 + 内嵌 JSON（用于100%还原）
    说明：
-   - 不包含敏感字段如密码、API密钥等（避免泄露）
+   - 不包含 github token / password 等敏感字段（避免泄露/触发 Secret 扫描）
 ========================================================= */
 (function(){
   // 强制关闭“顶部备份提醒横幅”（用户要求移除该功能）
@@ -1131,15 +327,14 @@ window.__tpi_legacy_loadTpiData_1 = function () {
     // 最后一层保险：移除潜在敏感字段
     try{
       if (dayData && typeof dayData === 'object') {
-        // 移除敏感字段
-        delete dayData.api_key;
-        delete dayData.api_token;
-        delete dayData.password;
+        delete dayData.github_token;
+        delete dayData['github-token'];
+        delete dayData['github_token'];
         if (dayData._formState && typeof dayData._formState==='object') {
           Object.keys(dayData._formState).forEach(k=>{
             const it = dayData._formState[k] || {};
             const sel = String(it.selector||'');
-            if (/token|secret|password|pat|api[_-]?key/i.test(k) || /token|secret|password|pat|api[_-]?key/i.test(sel)) delete dayData._formState[k];
+            if (/token|secret|password|pat/i.test(k) || /token|secret|password|pat/i.test(sel)) delete dayData._formState[k];
           });
         }
       }
@@ -1386,13 +581,13 @@ function __tpi_collectFormState() {
   }
 
   controls.forEach((el, idx) => {
-    // ✅ 关键：敏感字段不进快照（避免泄露密码、API密钥等）
+    // ✅ 关键：敏感字段不进快照（否则会被同步到 GitHub 触发 409 / Secret Scanning）
     const id = (el && el.id) ? String(el.id) : '';
     const typeAttr = (el && el.getAttribute) ? (el.getAttribute('type') || '') : '';
     const type = String(typeAttr).toLowerCase();
 
-    // token / password / secret / api_key 一律跳过
-    if (/token|secret|password|pat|api[_-]?key/i.test(id) || type === 'password') {
+    // token / password / secret 一律跳过（你可以按需扩展关键词）
+    if (id === 'github-token' || id === 'github_token' || /token|secret|password|pat/i.test(id) || type === 'password') {
       return;
     }
 
@@ -1742,13 +937,15 @@ window.collectDailyData = function() {
 
   // 新增：完整表单 + 规则生成视图
   data["_formState"] = __tpi_collectFormState();
-  // ✅ 二次保险：防止历史缓存/遗漏字段导致敏感数据被带入导出/同步内容
+  // ✅ 二次保险：防止历史缓存/遗漏字段导致 token 被带入导出/同步内容
   try {
     if (data["_formState"] && typeof data["_formState"] === 'object') {
+      delete data["_formState"]["#github-token"];
+      delete data["_formState"]["#github_token"];
       Object.keys(data["_formState"]).forEach(k => {
         const it = data["_formState"][k];
         const sel = it && it.selector ? String(it.selector) : '';
-        if (/token|secret|password|pat|api[_-]?key/i.test(k) || /token|secret|password|pat|api[_-]?key/i.test(sel)) {
+        if (/github-token|github_token/i.test(k) || /github-token|github_token/i.test(sel) || /token|secret|password|pat/i.test(k)) {
           delete data["_formState"][k];
         }
       });
@@ -2031,7 +1228,7 @@ window.getTpiDayData = function(dateStr) {
     if (tempSnapshot) {
       const snap = JSON.parse(tempSnapshot);
       if (snap && snap.data) {
-        // console.log(`[读取数据] 临时快照: ${dateStr}`); // [优化8: console.log已清理]
+        console.log(`[读取数据] 临时快照: ${dateStr}`);
         return snap.data;
       }
     }
@@ -2039,13 +1236,13 @@ window.getTpiDayData = function(dateStr) {
 
   // 2. 读取云端下载缓存（如果存在）
   if (window.__TPI_CLOUD_CACHE__ && window.__TPI_CLOUD_CACHE__[dateStr]) {
-        // console.log(`[读取数据] 云端缓存: ${dateStr}`); // [优化8: console.log已清理]
+    console.log(`[读取数据] 云端缓存: ${dateStr}`);
     return window.__TPI_CLOUD_CACHE__[dateStr];
   }
 
   // 3. 读取合并库（兼容旧数据）
   if (window.__TPI_MERGED_DB__ && window.__TPI_MERGED_DB__[dateStr]) {
-        // console.log(`[读取数据] 合并库: ${dateStr}`); // [优化8: console.log已清理]
+    console.log(`[读取数据] 合并库: ${dateStr}`);
     return window.__TPI_MERGED_DB__[dateStr];
   }
 
@@ -2053,20 +1250,20 @@ window.getTpiDayData = function(dateStr) {
   try {
     const local = __tpi_ls_get(`tpi_data_${dateStr}`);
     if (local) {
-        // console.log(`[读取数据] 本地缓存(旧): ${dateStr}`); // [优化8: console.log已清理]
+      console.log(`[读取数据] 本地缓存(旧): ${dateStr}`);
       return JSON.parse(local);
     }
   } catch(e) {}
 
-        // console.log(`[读取数据] 无数据: ${dateStr}`); // [优化8: console.log已清理]
+  console.log(`[读取数据] 无数据: ${dateStr}`);
   return null;
 };
 
 </script>
 <script>
 /* =========================================================
-   [已移除] 旧版云端同步相关函数 (已切换到 Appwrite BaaS)
-   - 保留空实现以确保兼容性，避免旧代码调用时报错
+   [Replaced] GitHub 同步脚本已移除（已切换到 TPI+ 后端 /register /login /save /load）
+   - 为避免旧按钮/旧调用残留导致报错，这里仅保留最小空实现（不会访问 GitHub）
 ========================================================= */
 (function(){
   function _msg(txt){
@@ -2074,17 +1271,19 @@ window.getTpiDayData = function(dateStr) {
       if (window.tpiToast) return window.tpiToast(txt, 'info');
       if (window.safeShowToast) return window.safeShowToast(txt);
     }catch(e){}
+    try{ console.log(txt); }catch(e){}
   }
 
   const disabled = function(){
-    _msg('ℹ️ 已切换为Appwrite云端同步，请使用新的云端同步功能。');
+    _msg('ℹ️ 已切换为后端同步：此页面不再支持 GitHub 同步。请使用本页【云端同步 Cloud Sync (TPI+ 后端)】区域。');
   };
 
-  // 兼容旧入口（防止旧代码调用时报错）
-  window.saveCloudConfig = disabled;
-  window.testCloudConnection = disabled;
-  window.syncToCloud = disabled;
-  window.loadFromCloud = disabled;
+  // 兼容旧入口（如果旧代码仍调用，不会抛错）
+  window.saveGitHubConfig = disabled;
+  window.testGitHubConnection = disabled;
+  window.syncToGitHub = disabled;
+  window.loadFromGitHub = disabled;
+  window.uploadToGitHub = disabled;
 })();
 </script>
 <script>
@@ -2289,56 +1488,15 @@ window.exportAsMarkdown = function () {
             return `${year}-${month}-${day}`;
         };
         
-        // 系统版本号
-        window.TPI_VERSION = 'Appwrite BaaS云端同步版';
+        // 系统版本号 (第22版 草稿7)
+        window.TPI_VERSION = '第22版（GitHub云端同步版，草稿22）';
         window.TPI_DATA_VERSION = '4.2';
         window.TPI_BUILD_DATE = getCurrentDate(); // 动态获取当前日期
-        window.TPI_FIX_DATE = '2026-02-14';
-        window.TPI_FIX_NOTE = '已切换为Appwrite BaaS全托管后端，移除GitHub残留代码';
+        window.TPI_FIX_DATE = '2026-01-31'; // 修复日期
+        window.TPI_FIX_NOTE = '修复了数据导出与备份模块4个按钮函数未定义的问题';
         
         // 更新页面标题为当前日期和星期、农历
         document.addEventListener('DOMContentLoaded', function() {
-
-// ===================================================================
-// 弹窗增强系统 (优化11: 增强弹窗体验)
-// ===================================================================
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        // 关闭所有模态框
-        const modals = document.querySelectorAll('.modal, .modal-overlay, [role="dialog"]');
-        modals.forEach(modal => {
-            if (modal.style.display !== 'none') {
-                modal.style.display = 'none';
-                // 移除遮罩层
-                const overlay = document.querySelector('.modal-backdrop, .overlay');
-                if (overlay) overlay.remove();
-            }
-        });
-        
-        // 恢复body滚动
-        document.body.style.overflow = '';
-    }
-});
-
-// 点击遮罩层关闭弹窗
-document.addEventListener('click', (e) => {
-    if (e.target.classList.contains('modal-overlay') || 
-        e.target.classList.contains('modal-backdrop')) {
-        e.target.style.display = 'none';
-        e.target.remove();
-        
-        // 关闭相关的模态框
-        const modals = document.querySelectorAll('.modal, [role="dialog"]');
-        modals.forEach(modal => {
-            modal.style.display = 'none';
-        });
-        
-        // 恢复body滚动
-        document.body.style.overflow = '';
-    }
-});
-
-
             const today = new Date();
             const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
             const weekday = weekdays[today.getDay()];
@@ -2565,7 +1723,7 @@ document.addEventListener('click', (e) => {
                 align-items: center;
                 gap: 4px;
             `;
-            errorDiv.innerHTML /*XSS-Safe*/ = `<span>⚠️</span><span>${message}</span>`;
+            errorDiv.innerHTML = `<span>⚠️</span><span>${message}</span>`;
 
             input.parentNode.insertBefore(errorDiv, input.nextSibling);
 
@@ -3353,47 +2511,6 @@ body {
     margin: 0 auto;
   }
 }
-
-/* ===== Bonus (韧性加分) 点击体验修复：扩大可点击热区 & 防止局部遮挡 ===== */
-#bonus .alert label{
-  padding: 10px !important;
-  border-radius: 8px !important;
-  min-height: 44px;
-  position: relative;
-}
-#bonus .alert label input[type="checkbox"]{
-  width: 20px;
-  height: 20px;
-  cursor: pointer;
-  position: relative;
-  z-index: 2;
-  flex: 0 0 auto;
-}
-#bonus .alert label > div{
-  position: relative;
-  z-index: 1;
-}
-
-
-/* ===== Bonus 提示徽标 + 点击兜底（保守稳定版） ===== */
-#bonus .card-title{display:flex;align-items:center;gap:8px;}
-#bonus .bonus-cap-hint{
-  margin-left:auto;
-  font-size:12px;
-  color:var(--color-text-secondary);
-  background:rgba(0,0,0,0.04);
-  border:1px solid rgba(0,0,0,0.06);
-  padding:2px 8px;
-  border-radius:999px;
-  white-space:nowrap;
-}
-body.dark-mode #bonus .bonus-cap-hint{
-  background:rgba(255,255,255,0.06);
-  border-color:rgba(255,255,255,0.12);
-}
-#bonus .alert{ position: relative; z-index: 3; }
-#bonus .alert label{ pointer-events: auto; }
-#bonus .alert label *{ pointer-events: auto; }
 </style>
 
 <style>
@@ -3432,15 +2549,15 @@ body.dark-theme .sync-status-container span {
     color: #d1d5db !important;
 }
 
-body.dark-mode .cloud-config-grid input,
-body.dark-theme .cloud-config-grid input {
+body.dark-mode .github-config-grid input,
+body.dark-theme .github-config-grid input {
     background: #374151 !important;
     border-color: #4b5563 !important;
     color: #f3f4f6 !important;
 }
 
-body.dark-mode .cloud-config-grid label,
-body.dark-theme .cloud-config-grid label {
+body.dark-mode .github-config-grid label,
+body.dark-theme .github-config-grid label {
     color: #d1d5db !important;
 }
 
@@ -3848,22 +2965,22 @@ window.exportReportComplete = function(format) {
     }
 };
 
-// 2. 从云端加载函数 - 使用Appwrite云端同步
+// 2. 从云端加载函数 - 现在使用GitHub云端同步
 window.loadFromCloudComplete = function() {
     console.log('🔵 [loadFromCloudComplete] 从云端加载功能被调用');
     console.log('🔵 [loadFromCloudComplete] 执行时间:', new Date().toLocaleString());
     
     try {
-        // 使用Appwrite云端同步
-        console.log('🔍 [loadFromCloudComplete] 使用Appwrite云端同步方式');
+        // Firebase已移除，现在使用GitHub云端同步
+        console.log('🔍 [loadFromCloudComplete] 使用GitHub云端同步方式');
         
-        // 检查Appwrite加载函数是否可用
-        if (window.loadFromAppwrite && typeof window.loadFromAppwrite === 'function') {
-            console.log('✅ [loadFromCloudComplete] 调用Appwrite加载功能');
-            window.loadFromAppwrite();
+        // 检查GitHub加载函数是否可用
+        if (window.loadFromGitHub && typeof window.loadFromGitHub === 'function') {
+            console.log('✅ [loadFromCloudComplete] 调用GitHub加载功能');
+            window.loadFromGitHub();
         } else {
-            console.warn('⚠️ [loadFromCloudComplete] Appwrite加载功能未初始化');
-            alert('⚠️ Appwrite云端同步功能初始化中\n\n请稍等片刻后重试\n\n如果持续出现此问题，请刷新页面');
+            console.warn('⚠️ [loadFromCloudComplete] GitHub加载功能未初始化');
+            alert('⚠️ GitHub云端同步功能初始化中\n\n请稍等片刻后重试\n\n如果持续出现此问题，请刷新页面');
         }
     } catch (error) {
         console.error('❌ [loadFromCloudComplete] 从云端加载失败:', error);
@@ -4325,7 +3442,7 @@ if (typeof window.showModal === 'undefined') {
             iconColor = '#f59e0b';
         }
         
-        content.innerHTML /*XSS-Safe*/ = `
+        content.innerHTML = `
             <div class="modal-header" style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="font-size: 24px;">${icon}</div>
@@ -5149,7 +4266,7 @@ window.__tpi_legacy_loadTpiData_2 = function() {
             }
         });
         
-        // console.log(`✅ 成功恢复 ${restoredCount} 个字段`); // [优化8: console.log已清理]
+        console.log(`✅ 成功恢复 ${restoredCount} 个字段`);
         showToastEarly(`恢复成功！\n已恢复 ${restoredCount} 个字段`, 'success');
         
         // 尝试触发全局重新计算
@@ -5173,141 +4290,61 @@ window.__tpi_legacy_loadTpiData_2 = function() {
 
 
 /* =========================================================
-   ✅ 修复：“恢复保存的数据”按钮（loadTpiData）
-   目标：
-   - 点击“恢复保存的数据”不再出现“按钮功能未绑定 / missing function stub”
-   - 云端优先：若已登录且 Appwrite 可用，则从云端下载所选日期并真实恢复
-   - 本地兜底：若云端不可用/无数据，则从本地快照 tpi_data_YYYY-MM-DD 恢复
-   - 兼容兜底：仍保留旧草稿入口 __tpi_legacy_loadTpiData_2（如存在）
-   说明：
-   - 仅补齐 loadTpiData，不改动你的同步技术路线与其它按钮绑定
+   ✅ 修复：恢复保存的数据 按钮绑定（仅修复此处，不影响其他功能）
+   - 页面按钮 onclick="loadTpiData()"
+   - 之前仅生成兜底 stub，导致点击无效果
+   - 这里将 loadTpiData 显式绑定到本地缓存恢复逻辑：
+     1) 优先恢复当前选择日期 tpi_data_YYYY-MM-DD（对应“保存当前数据”写入的快照）
+     2) 若不存在，再回退到旧草稿 tpi_draft_data
 ========================================================= */
+
 (function(){
-  // 1) 如果已经是“真实实现”，就不覆盖
+  // ✅ 修复：某些版本里 loadTpiData 先被生成了“占位/空函数”，导致按钮点击无反应
+  // 这里仅在“未定义”或“占位实现”时覆盖，不影响真正的实现
   const __existing = window.loadTpiData;
-
-  // 判定“占位/兜底 stub”（来自自动绑定器）——需要覆盖
-  const __isPlaceholder = (fn) => {
-    if (typeof fn !== 'function') return true;
-    const s = String(fn);
-    return /按钮功能未绑定|missing function stub|占位|stub|TODO|not implemented|暂无/i.test(s);
-  };
-
-  if (typeof __existing === 'function' && !__isPlaceholder(__existing) && __existing.__tpi_real === true) return;
-
-  function _toast(msg, type){
-    try{
-      if (window.tpiToast) return window.tpiToast(msg, type||'info');
-      if (window.showToast) return window.showToast(msg, type||'info');
-      if (window.showNotification) return window.showNotification(msg, type||'info');
-    }catch(e){}
-    try{ alert(msg); }catch(e){}
-  }
+  const __isPlaceholder = (typeof __existing === 'function') && /占位|stub|TODO|not implemented|return\s*false|console\.warn\(\'loadTpiData\'|暂无/i.test(String(__existing));
+  if (typeof __existing === 'function' && !__isPlaceholder) return;
 
   function _safeParse(str){
     try{ return (typeof window.safeJSONParseEarly === 'function') ? window.safeJSONParseEarly(str) : JSON.parse(str); }
     catch(e){ return null; }
   }
 
-  function _getDate(){
+  window.loadTpiData = function(){
     try{
-      if (typeof window.__tpi_getSelectedDate === 'function') return window.__tpi_getSelectedDate();
-      const di = document.getElementById('date-input');
-      if (di && di.value) return di.value;
-    }catch(e){}
-    // ✅ 本地日期（避免 UTC 跨日）
-    try{
-      const d = new Date();
-      const yyyy=d.getFullYear(), mm=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
-      return `${yyyy}-${mm}-${dd}`;
-    }catch(e){ return new Date().toISOString().split('T')[0]; }
-  }
+      const date = (typeof window.__tpi_getSelectedDate === 'function')
+        ? window.__tpi_getSelectedDate()
+        : (new Date().toISOString().split('T')[0]);
 
-  function _extractDayData(result, date){
-    if (!result) return null;
-    // 1) 结果直接就是 dayData
-    if (result && typeof result === 'object' && !Array.isArray(result)) {
-      // 2) 结果是 { [date]: dayData }
-      if (result[date] && typeof result[date] === 'object') return result[date];
-      // 3) 结果是 { data: dayData } 或 { payload: dayData }
-      if (result.data && typeof result.data === 'object') return result.data;
-      if (result.payload && typeof result.payload === 'object') return result.payload;
-      // 4) 可能就是 dayData（带很多字段）
-      return result;
-    }
-    return null;
-  }
-
-  async function _restoreFromCloud(date){
-    if (typeof window.downloadFromAppwrite !== 'function') return null;
-    try{
-      _toast(`⏳ 正在从云端下载：${date} ...`, 'info');
-      const result = await window.downloadFromAppwrite(date);
-      const dayData = _extractDayData(result, date);
-      if (!dayData) return null;
-
-      if (typeof window.restoreUIFromData === 'function') {
-        window.restoreUIFromData(dayData);
-      }
-      // 同步写回本地快照（方便离线恢复）
-      try{
-        if (typeof window.__tpi_ls_set === 'function') window.__tpi_ls_set(`tpi_data_${date}`, JSON.stringify(dayData));
-        else if (window.localStorage) localStorage.setItem(`tpi_data_${date}`, JSON.stringify(dayData));
-      }catch(e){}
-      _toast(`✅ 已从云端恢复：${date}`, 'success');
-      return dayData;
-    }catch(e){
-      console.error('[loadTpiData] cloud restore failed:', e);
-      return null;
-    }
-  }
-
-  function _restoreFromLocal(date){
-    try{
+      // 1) 优先：按日期的本地快照（由“保存当前数据”写入）
       const keyByDate = `tpi_data_${date}`;
-      const dataStr = (typeof window.__tpi_ls_get === 'function')
-        ? window.__tpi_ls_get(keyByDate)
-        : (window.localStorage ? localStorage.getItem(keyByDate) : null);
-      if (!dataStr) return null;
-
-      const dayData = _safeParse(dataStr);
-      if (!dayData) return null;
-
-      if (typeof window.restoreUIFromData === 'function') {
-        window.restoreUIFromData(dayData);
+      const dataStr1 = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(keyByDate) : (localStorage ? localStorage.getItem(keyByDate) : null);
+      if (dataStr1) {
+        const data1 = _safeParse(dataStr1);
+        if (!data1) { alert('❌ 本地保存数据已损坏，无法恢复'); return false; }
+        if (typeof window.restoreUIFromData === 'function') {
+          window.restoreUIFromData(data1);
+        } else {
+          console.warn('[TPI] restoreUIFromData 不存在，已跳过 UI 恢复');
+        }
+        alert(`✅ 已从本地缓存恢复：${date}`);
+        return true;
       }
-      _toast(`✅ 已从本地缓存恢复：${date}`, 'success');
-      return dayData;
+
+      // 2) 回退：旧草稿恢复（兼容历史）
+      if (typeof window.__tpi_legacy_loadTpiData_2 === 'function') {
+        return window.__tpi_legacy_loadTpiData_2();
+      }
+
+      alert('⚠️ 未找到可恢复的数据（本地快照/草稿均不存在）');
+      return false;
     }catch(e){
-      console.error('[loadTpiData] local restore failed:', e);
-      return null;
+      console.error('[TPI] loadTpiData failed:', e);
+      alert('❌ 恢复失败：请查看控制台错误信息');
+      return false;
     }
-  }
-
-  // ✅ 最终对外暴露：按钮 onclick="loadTpiData()"
-  window.loadTpiData = async function(){
-    const date = _getDate();
-
-    // 1) 云端优先
-    const cloud = await _restoreFromCloud(date);
-    if (cloud) return true;
-
-    // 2) 本地兜底
-    const local = _restoreFromLocal(date);
-    if (local) return true;
-
-    // 3) 兼容旧草稿入口
-    if (typeof window.__tpi_legacy_loadTpiData_2 === 'function') {
-      try { return !!window.__tpi_legacy_loadTpiData_2(); } catch(e) {}
-    }
-
-    _toast('⚠️ 未找到可恢复的数据（云端/本地均无）', 'warning');
-    return false;
   };
-
-  window.loadTpiData.__tpi_real = true;
 })();
-
 
 // 全局导出函数: 导出为JSON
 window.__tpi_legacy_exportAsJSON_2 = function() {
@@ -5848,7 +4885,7 @@ window.exportAsCSV = function() {
 问题6: LoadingIndicator在耗时操作中的使用
 - 状态：✅ 已添加(Firebase已移除)
 - 修改内容：
-  1. Appwrite云端同步功能
+  1. GitHub云端同步功能
      - 开始时：添加 LoadingIndicator.show('正在同步到云端...')
      - 成功时：添加 LoadingIndicator.hide()
      - 失败时：添加 LoadingIndicator.hide()
@@ -5865,7 +4902,7 @@ window.exportAsCSV = function() {
   - 防止指示器永久停留
 
 - 验证结果：
-  ✅ 云端同步时显示"正在同步到云端..."
+  ✅ GitHub同步时显示"正在同步到云端..."
   ✅ 操作完成后自动隐藏
   ✅ 错误情况下也正确隐藏
 
@@ -5994,7 +5031,7 @@ window.exportAsCSV = function() {
 4. 输入体验：任务栏扩大3倍，便于详细记录
 
 测试建议：
-- 测试Appwrite云端同步的加载动画
+- 测试GitHub云端同步的加载动画
 - 测试页面刷新后无重复绑定
 - 测试分数看板在不同屏幕尺寸下的显示
 - 测试任务栏和待办杂事的输入体验
@@ -6006,13 +5043,13 @@ window.exportAsCSV = function() {
 - 所有系统init函数都有防重复保护
 ═══════════════════════════════════════════════════════════════
 -->
-<!-- ==================== Appwrite云端同步模块 ==================== -->
+<!-- ==================== GitHub云端同步模块 (第30版新增) ==================== -->
 <div class="container">
 <section class="card fade-in" id="cloud-sync-section">
 <div class="card-header" onclick="window.TPI && window.TPI.toggleCard ? window.TPI.toggleCard('cloud-sync-section') : null">
   <div class="card-title">
     <span class="icon">☁️</span>
-    <span>云端同步 Cloud Sync (Appwrite BaaS)</span>
+    <span>云端同步 Cloud Sync (TPI+ 后端)</span>
   </div>
 </div>
 <div class="card-content">
@@ -7840,14 +6877,14 @@ try {
         if (!listContainer || !doneContainer) return;
         // v3.1：为每个分区注入工具栏（排序/批量删除）
         this.ensureSectionToolbar(key);
-        listContainer.innerHTML /*XSS-Safe*/ = '';
-        doneContainer.innerHTML /*XSS-Safe*/ = '';
+        listContainer.innerHTML = '';
+        doneContainer.innerHTML = '';
 
         const items = this.data[key] || [];
 
         // 0. 空状态优化：如果没有数据，显示激励插画
         if (items.length === 0) {
-            listContainer.innerHTML /*XSS-Safe*/ = `
+            listContainer.innerHTML = `
                 <div style="text-align:center; padding: 30px 10px; color:#adb5bd;">
                     <div style="font-size: 40px; margin-bottom: 10px;">🏝️</div>
                     <div>当前无待办事件</div>
@@ -7892,7 +6929,7 @@ try {
 
         // 渲染待办
         if (pending.length === 0) {
-            listContainer.innerHTML /*XSS-Safe*/ = `
+            listContainer.innerHTML = `
                 <div style="text-align:center; padding: 20px 10px; color:#10b981;">
                     <div style="font-size: 24px; margin-bottom: 5px;">🎉</div>
                     <div style="font-size: 13px;">全部完成，太棒了！</div>
@@ -7904,10 +6941,10 @@ try {
 
         // 渲染已完成 (折叠)
         if (done.length > 0) {
-            doneContainer.innerHTML /*XSS-Safe*/ = `<div style="padding:10px; font-weight:600; color:#6b7280; font-size:12px; cursor:pointer; border-top: 1px dashed #e5e7eb; margin-top: 5px;" onclick="this.parentElement.classList.toggle('collapsed')">✅ 已完成 (${done.length}) <span style="font-size:10px; opacity:0.7;">(点击展开/折叠)</span> ▼</div>`;
+            doneContainer.innerHTML = `<div style="padding:10px; font-weight:600; color:#6b7280; font-size:12px; cursor:pointer; border-top: 1px dashed #e5e7eb; margin-top: 5px;" onclick="this.parentElement.classList.toggle('collapsed')">✅ 已完成 (${done.length}) <span style="font-size:10px; opacity:0.7;">(点击展开/折叠)</span> ▼</div>`;
             done.forEach(item => doneContainer.innerHTML += this.createCardHtml(key, item));
         } else {
-            doneContainer.innerHTML /*XSS-Safe*/ = '';
+            doneContainer.innerHTML = '';
         }
     }
 
@@ -8693,7 +7730,7 @@ try {
         container.style.borderRadius = '10px';
         container.style.background = 'var(--color-bg-secondary)';
 
-        container.innerHTML /*XSS-Safe*/ = `
+        container.innerHTML = `
             <div class="misc-log-head">
                 <div style="font-weight:600; color:var(--color-text-primary);">⭐ 优先级</div>
                 <input type="hidden" id="radar-priority-value" value="1" />
@@ -8798,7 +7835,7 @@ toolbar.style.border = '1px solid var(--color-border-light)';
 toolbar.style.borderRadius = '0 0 12px 12px';
 const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'priority';
 
-        toolbar.innerHTML /*XSS-Safe*/ = `
+        toolbar.innerHTML = `
             <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-size:12px; color:var(--color-text-muted);">排序：</span>
                 <select class="radar-sort-select" style="padding:6px 10px; border-radius:10px; border:1px solid var(--color-border); background:var(--color-bg-primary);">
@@ -10440,7 +9477,6 @@ else FutureRadar.init();
 <span>
          韧性与突破加分
         </span>
-<span class="bonus-cap-hint" title="奖励分值与封顶提示：各维度≤6、全局≤8、总≤10（保守稳定）">封顶：维度≤6｜全局≤8｜总≤10</span>
 </div>
 </div>
 <div class="card-content">
@@ -10468,14 +9504,14 @@ else FutureRadar.init();
 <li>
               🔥
               <strong>
-               超级心流奖 (+3分)
+               超级心流奖 (+5分)
               </strong>
               ：当日 AMI 中 ≥3 个时段 F=1.3。深度专注是质量标志，3个时段是显著突破。
              </li>
 <li>
               🧗
               <strong>
-               攻坚勇士奖 (+4分)
+               攻坚勇士奖 (+7分)
               </strong>
               ：当日完成 3 个及以上 Type D 任务。攻坚任务是最高难度，完成3个是巨大突破。
              </li>
@@ -10489,7 +9525,7 @@ else FutureRadar.init();
 <li>
               ⚖️
               <strong>
-               完美作息平衡奖 (+3分)
+               完美作息平衡奖 (+5分)
               </strong>
               ：晨间入馆 &lt;08:45 &amp; 睡眠 &lt;00:00 &amp; 午晚双坚守。三项核心作息指标同时达标，代表系统性改善。
              </li>
@@ -10513,43 +9549,34 @@ else FutureRadar.init();
 <h4>
            二、全局进步奖励（替代原自由填写）
           </h4>
-<p style="margin: 6px 0 10px; font-size: 0.9em; color: var(--color-text-secondary);">
-  <strong>保守稳定限制：</strong>全局奖励当日封顶 <strong>≤8分</strong>；与“各维度奖励”合并后，奖励总加分当日封顶 <strong>≤10分</strong>。
-</p>
 <ul>
 <li>
             🏆
             <strong>
-             状态回升奖 (+4分)
+             状态回升奖 (+7分)
             </strong>
             ：前一日 TPI &lt; 95 &amp; 本日 TPI ≥ 140。从低谷强力反弹，证明恢复能力。
            </li>
 <li>
             💎
             <strong>
-             卓越表现奖 (+4分)
+             卓越表现奖 (+5分)
             </strong>
             ：本日 TPI ≥ 160（达到"卓越"级别）。达到卓越级别本身就是重大成就。
            </li>
 <li>
             🔄
             <strong>
-             快速恢复奖 (+2分)
+             快速恢复奖 (+3分)
             </strong>
             ：从前一日[复苏/斯多葛]模式切换回[常态]模式，首日 TPI ≥ 130。奖励快速调整恢复能力。
            </li>
-<li>
-  🏋️ <strong>高强度稳定日 (+3分)</strong>：当日处于高强度（任务密度/压力明显偏高）但仍保持关键模块不崩盘，并达到稳态阈值（建议：TPI ≥ 140 且核心模块完成度达标）。奖励“高压下仍稳定”的能力。
-</li>
-<li>
-  🛡️ <strong>抗干扰稳态奖 (+2分)</strong>：当日出现明显干扰/突发事件，但仍维持底线任务推进与作息关键点不失守。奖励“抗扰动而不崩”的稳态能力。
-</li>
 <li>
             📊
             <strong>
              连续稳定奖（梯度奖励）
             </strong>
-            ：连续 TPI ≥ 120 达到 7日(+2分)/14日(+3分)/21日(+5分)。奖励持续性，仅在里程碑日奖励。
+            ：连续 TPI ≥ 120 达到 7日(+3分)/14日(+5分)/21日(+7分)。奖励持续性，仅在里程碑日奖励。
            </li>
 </ul>
 <h4>
@@ -10597,9 +9624,6 @@ else FutureRadar.init();
 <h4>
          📝 各维度进步奖励 (Dimension Progress Bonus)
         </h4>
-<p style="margin: 6px 0 0; font-size: 0.9em; color: var(--color-text-secondary);">
-  <strong>保守稳定限制：</strong>各维度奖励当日封顶 <strong>≤6分</strong>；全局奖励当日封顶 <strong>≤8分</strong>；奖励总加分当日封顶 <strong>≤10分</strong>（用于避免“奖励堆分”破坏长期趋势可比性）。
-</p>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--spacing-4); margin-top: var(--spacing-3); margin-bottom: var(--spacing-6);">
 <label onmouseout="this.style.background='transparent'" onmouseover="this.style.background='rgba(0,0,0,0.03)'" style="display: flex; align-items: flex-start; gap: var(--spacing-2); cursor: pointer; padding: 4px; border-radius: 4px; transition: background 0.2s;">
 <input aria-label="超级心流" class="tpi-u-mt-4px" name="bonus-item" onchange="TPI.calculateBonus(); TPI.calculateSystem()" type="checkbox" value="flow"/>
@@ -10699,7 +9723,6 @@ else FutureRadar.init();
     <small class="text-muted" style="display: block; font-size: 0.75rem; line-height: 1.3;">遭遇干扰/波动仍保持关键任务推进与作息底线（自评）</small>
   </div>
 </label>
-
 
 <label onmouseout="this.style.background='transparent'" onmouseover="this.style.background='rgba(0,0,0,0.03)'" style="display: flex; align-items: flex-start; gap: var(--spacing-2); cursor: pointer; padding: 4px; border-radius: 4px; transition: background 0.2s;">
 <input aria-label="连续稳定7日" class="tpi-u-mt-4px" name="bonus-item" onchange="TPI.calculateBonus(); TPI.calculateSystem()" type="checkbox" value="streak7"/>
@@ -15346,15 +14369,7 @@ else FutureRadar.init();
 </div>
 </div>
 </div>
-<!-- 数据保存与恢复 -->
-<div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
-<button class="btn btn-success" onclick="exportCurrentSnapshot('markdown')" style="flex: 1; min-width: 140px;">
-           💾 保存当前数据
-          </button>
-<button class="btn btn-info" onclick="loadTpiData()" style="flex: 1; min-width: 140px;">
-           📥 恢复保存的数据
-          </button>
-</div>
+
 <div style="padding: 10px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 6px; font-size: 13px; margin-top: 15px;">
 <strong>✅ 导出说明:</strong>
 <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 12px;">
@@ -15519,7 +14534,7 @@ class ModeManager {
     showTriggerWarning(trigger, message) {
         const warningDiv = document.getElementById('mode-auto-trigger-warning');
         if (warningDiv) {
-            warningDiv.innerHTML /*XSS-Safe*/ = `
+            warningDiv.innerHTML = `
                 <div class="alert alert-warning" role="alert">
                     <strong>🚨 自动触发器激活: ${trigger}</strong><br>
                     ${message}
@@ -15666,7 +14681,7 @@ class BonusCalculator {
 
         const bonusListElem = document.getElementById('bonus-breakdown-list');
         if (bonusListElem) {
-            bonusListElem.innerHTML /*XSS-Safe*/ = this.bonuses.map(b =>
+            bonusListElem.innerHTML = this.bonuses.map(b =>
                 `<li><strong>${b.name}</strong>: +${b.points}分 (${b.reason})</li>`
             ).join('');
         }
@@ -16146,13 +15161,12 @@ const TPI = (function() {
                             }
                         });
 
-                        // 复苏模式：不再禁用 Bonus 复选框（否则会出现“方框无法勾选”的问题）
-                        // 仅保留提示文案，由用户自行决定是否勾选
                         bonusCheckboxes.forEach(cb => {
-                            cb.disabled = false;
+                            cb.disabled = true;
+                            cb.checked = false; // 同时取消勾选
                             if (cb.parentElement) {
-                                cb.parentElement.style.opacity = '1';
-                                cb.parentElement.title = '复苏模式：建议谨慎使用加分项（仍可手动勾选）';
+                                cb.parentElement.style.opacity = '0.5';
+                                cb.parentElement.title = '复苏模式下禁用额外加分项';
                             }
                         });
 
@@ -17504,18 +16518,11 @@ function calculateAMI() {
             }
 
             function checkBonusBox(val) {
-    const el = document.querySelector(`input[name="bonus-item"][value="${val}"]`);
-    // 若用户已手动操作过该项，则不再被自动逻辑覆盖
-    if (el && el.dataset && el.dataset.userOverride === '1') return;
-    if (el && !el.checked) { el.checked = true; calculateBonus(); }
-}
-function uncheckBonusBox(val) {
-    const el = document.querySelector(`input[name="bonus-item"][value="${val}"]`);
-    // 若用户已手动操作过该项，则不再被自动逻辑覆盖
-    if (el && el.dataset && el.dataset.userOverride === '1') return;
-    if (el && el.checked) { el.checked = false; calculateBonus(); }
-}
-"]`);
+                const el = document.querySelector(`input[name="bonus-item"][value="${val}"]`);
+                if (el && !el.checked) { el.checked = true; calculateBonus(); }
+            }
+            function uncheckBonusBox(val) {
+                const el = document.querySelector(`input[name="bonus-item"][value="${val}"]`);
                 if (el && el.checked) { el.checked = false; calculateBonus(); }
             }
 
@@ -18230,60 +17237,36 @@ function uncheckBonusBox(val) {
         }
 
         function calculateBonus() {
-            // 维度奖励 & 全局奖励 分别封顶，避免“奖励膨胀”破坏长期可比性
-            const DIM_KEYS = new Set(['flow','warrior','balance','micro-victories']);
-            const GLOBAL_KEYS = new Set(['excellent','return','recovery','streak7','streak14','streak21','bonus_deep_review','bonus_steady']);
-
-            const DIM_CAP = 6;     // 各维度进步奖励：当日封顶
-            const GLOBAL_CAP = 8;  // 全局进步奖励：当日封顶
-            const TOTAL_CAP = 10;  // 奖励总加分：当日封顶（最终并入TPI）
-
-            let dimBonus = 0;
-            let globalBonus = 0;
-
+            let totalBonus = 0;
             const bonusItems = document.querySelectorAll('input[name="bonus-item"]:checked');
 
             bonusItems.forEach(item => {
-                const key = item.value;
-                let pts = 0;
-
-                switch(key) {
-                    // ========== 各维度进步奖励（保守版） ==========
-                    case 'flow': pts = 3; break;              // 超级心流
-                    case 'warrior': pts = 4; break;           // 攻坚勇士
-                    case 'balance': pts = 3; break;           // 完美作息
-                    case 'micro-victories': pts = 1; break;   // 微小胜利（轻量）
-
-                    // ========== 全局进步奖励（保守版） ==========
-                    case 'return': pts = 4; break;            // 状态回升
-                    case 'excellent': pts = 4; break;         // 卓越表现
-                    case 'recovery': pts = 2; break;          // 快速恢复
-                    case 'streak7': pts = 2; break;           // 连续稳定7日（里程碑日）
-                    case 'streak14': pts = 3; break;          // 连续稳定14日（里程碑日）
-                    case 'streak21': pts = 5; break;          // 连续稳定21日（里程碑日）
-                    case 'bonus_deep_review': pts = 3; break; // 高强度稳定日
-                    case 'bonus_steady': pts = 2; break;      // 抗干扰稳态奖
-
+                switch(item.value) {
+                    case 'flow': totalBonus += 3; break;  // 超级心流: 改为+3
+                    case 'balance': totalBonus += 3; break;  // 完美作息: 改为+3
+                    case 'excellent': totalBonus += 4; break;  // 卓越表现: 改为+4
+                    case 'warrior': totalBonus += 4; break;  // 攻坚勇士: 改为+4
+                    case 'return': totalBonus += 4; break;  // 状态回升: 改为+4
+                    case 'streak21': totalBonus += 5; break;  // 连续稳定21日: 保持+5
+                    case 'streak14': totalBonus += 3; break;  // 连续稳定14日: 改为+3
+                    case 'streak7': totalBonus += 2; break;  // 连续稳定7日: 改为+2
+                    case 'recovery': totalBonus += 2; break;  // 快速恢复: 改为+2
+                    case 'micro-victories': totalBonus += 1; break;  // 微小胜利
+                    case 'bonus_deep_review': totalBonus += 3; break;  // 高强度稳定日: +3
+                    case 'bonus_steady': totalBonus += 2; break;  // 抗干扰稳态: +2
                     default:
-                        // 兼容旧的数值型奖励（若仍存在），统一归入“全局”并走总封顶
-                        const val = safeParseFloat(key);
-                        if (val > 0) pts = val;
+                        const val = safeParseFloat(item.value);
+                        if(val>0) totalBonus += val;
                 }
-
-                if (DIM_KEYS.has(key)) dimBonus += pts;
-                else globalBonus += pts; // GLOBAL_KEYS & 其他数值型统一归为全局侧
             });
 
-            const dimFinal = Math.min(dimBonus, DIM_CAP);
-            const globalFinal = Math.min(globalBonus, GLOBAL_CAP);
-
-            // 奖励总封顶（最终写入 bonus-score / bonus-total-score）
-            const finalBonus = Math.min(dimFinal + globalFinal, TOTAL_CAP);
+            // 上限10分
+            const finalBonus = Math.min(totalBonus, 10);
 
             const bonusTotal = document.getElementById('bonus-total-score');
             const bonusInp = document.getElementById('bonus-score');
-            if (bonusTotal) bonusTotal.textContent = finalBonus.toFixed(1);
-            if (bonusInp) bonusInp.value = finalBonus.toFixed(1);
+            if(bonusTotal) bonusTotal.textContent = finalBonus.toFixed(1);
+            if(bonusInp) bonusInp.value = finalBonus.toFixed(1);
 
             return finalBonus;
         }
@@ -18700,13 +17683,13 @@ if (!calculateTPI_original) {
                     let restPeriods = parseInt(__tpi_ls_get('recovery_rest_periods') || '0');
                     const threshold = 45 - (restPeriods * 5);
 
-                    targetElement.innerHTML /*XSS-Safe*/ = `
+                    targetElement.innerHTML = `
                         目标分: ≥${threshold}分 (休息${restPeriods}个时段)<br>
                         <small style="color: #6b7280;">公式: 45-(休息时段×5) = 45-${restPeriods*5} = ${threshold}</small>
                     `;
                     targetElement.style.display = 'block';
                 } else {
-                    targetElement.innerHTML /*XSS-Safe*/ = '动态目标: max(40, 70 - 休息×10)';
+                    targetElement.innerHTML = '动态目标: max(40, 70 - 休息×10)';
                     targetElement.style.display = 'block';
 
                     // 退出复苏模式时重置休息时段计数
@@ -19460,7 +18443,7 @@ try {
                                         导出备份
                                     </button>
                                     <button onclick="closeAllModals();goToCloudSync();" class="modal-button" style="flex: 1; background: #3b82f6; color: white;">
-                                        云端同步
+                                        GitHub云端同步
                                     </button>
                                 </div>
                             </div>
@@ -19554,23 +18537,23 @@ try {
 
             // ==================== 数据导出功能 ====================
 // ==================== Firebase 云端同步功能已移除 ====================
-            // Firebase同步功能已完全移除，现在使用Appwrite作为云端同步方式
-            // 请使用Appwrite云端同步模块进行数据同步
+            // Firebase同步功能已完全移除，现在使用GitHub作为唯一云端同步方式
+            // 请使用GitHub云端同步模块进行数据同步
             
             /**
              * saveToFirebase - 已废弃，保留空函数以防止引用错误
              */
             function saveToFirebase() {
-                console.warn('[已废弃] Firebase同步已移除，请使用Appwrite云端同步');
-                showNotification('⚠️ Firebase同步已移除，请使用Appwrite云端同步功能', 'warning');
+                console.warn('[已废弃] Firebase同步已移除，请使用GitHub云端同步');
+                showNotification('⚠️ Firebase同步已移除，请使用GitHub云端同步功能', 'warning');
             }
 
             /**
              * loadFromFirebase - 已废弃，保留空函数以防止引用错误
              */
             function loadFromFirebase() {
-                console.warn('[已废弃] Firebase同步已移除，请使用Appwrite云端同步');
-                showNotification('⚠️ Firebase同步已移除，请使用Appwrite云端同步功能', 'warning');
+                console.warn('[已废弃] Firebase同步已移除，请使用GitHub云端同步');
+                showNotification('⚠️ Firebase同步已移除，请使用GitHub云端同步功能', 'warning');
             }
             /**
              * 导出数据 (增强文件名安全性)
@@ -20263,14 +19246,11 @@ try {
 
         // 监听Bonus相关输入
         document.querySelectorAll('input[name="bonus-item"]').forEach(input => {
-    input.addEventListener('change', () => {
-        // 标记为“用户手动选择”，避免被自动奖励逻辑反复覆盖造成“无法勾选/自动取消”的体验
-        try { input.dataset.userOverride = '1'; } catch(e) {}
-        calculateBonus();
-        if (typeof calculateTPI === 'function') calculateTPI();
-    });
-});
-}
+            input.addEventListener('change', () => {
+                calculateBonus();
+                    });
+                });
+            }
 
                         // ==================== 初始化函数 ====================
 
@@ -20311,7 +19291,7 @@ try {
                             const alertDiv = document.createElement('div');
                             alertDiv.className = 'alert alert-danger';
                             alertDiv.style.cssText = 'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 10000; max-width: 600px; box-shadow: 0 4px 20px rgba(220,38,38,0.3);';
-                            alertDiv.innerHTML /*XSS-Safe*/ = /*XSS-Safe*/`
+                            alertDiv.innerHTML = /*XSS-Safe*/`
                                 <h4>🚨 强制复苏模式已启动</h4>
                                 <p><strong>触发原因：</strong>${forceReason}</p>
                                 <p><strong>模式说明：</strong>今日已自动进入复苏模式，达标线将根据休息时段数量（0-4）动态调整为 70-40 分。</p>
@@ -20580,7 +19560,7 @@ try {
                                 border-radius: 12px;
                                 box-shadow: 0 4px 6px rgba(0,0,0,0.1);
                             `;
-                            alertDiv.innerHTML /*XSS-Safe*/ = `
+                            alertDiv.innerHTML = `
                                 <h4 style="margin-bottom: 15px; font-weight: 700;">🌉 海明威桥 - 从昨日延续</h4>
                                 ${cliffhanger ? `
                                 <div style="background: rgba(255,255,255,0.3); padding: 12px; border-radius: 8px; margin-bottom: 10px;">
@@ -22215,9 +21195,9 @@ const __exp = (function(){
 </div>
 <script>
 /* =========================================================
-   [Removed] 旧版云端同步模块
-   - 已切换为 Appwrite BaaS 全托管后端
-   - 旧的同步代码已禁用
+   [Removed] GitHub Gist 云端同步模块
+   - 已切换为 TPI+ 后端 /register /login /save /load
+   - 旧的 Gist 同步代码已禁用，避免任何对 GitHub 的访问
 ========================================================= */
 (function(){
   // 若旧按钮/旧逻辑仍残留调用，保持不报错
@@ -22389,7 +21369,7 @@ const CHANGELOG = [
     version: '20.0.0',
     date: window.TPI_BUILD_DATE || getCurrentDate(), // 使用动态日期
     changes: [
-      '✨ 移除：Firebase云端同步功能(改用Appwrite)',
+      '✨ 移除：Firebase云端同步功能(改用GitHub)',
       '✨ 新增：localStorage容量主动管理',
       '✨ 新增：数据备份强制提醒',
       '✨ 新增：移动端输入体验优化',
@@ -22723,15 +21703,15 @@ window.addEventListener('resize', function() {
     // Firebase云端同步已移除,保留兜底函数防止调用错误
     if (!window.TPI.saveToFirebase) {
         window.TPI.saveToFirebase = function() {
-            console.warn('[已废弃] Firebase同步已移除，请使用Appwrite云端同步');
-            alert('⚠️ Firebase同步已移除\n\n请使用Appwrite云端同步功能进行数据同步');
+            console.warn('[已废弃] Firebase同步已移除，请使用GitHub云端同步');
+            alert('⚠️ Firebase同步已移除\n\n请使用GitHub云端同步功能进行数据同步');
         };
     }
 
     if (!window.TPI.loadFromFirebase) {
         window.TPI.loadFromFirebase = function() {
-            console.warn('[已废弃] Firebase同步已移除，请使用Appwrite云端同步');
-            alert('⚠️ Firebase同步已移除\n\n请使用Appwrite云端同步功能进行数据同步');
+            console.warn('[已废弃] Firebase同步已移除，请使用GitHub云端同步');
+            alert('⚠️ Firebase同步已移除\n\n请使用GitHub云端同步功能进行数据同步');
         };
     }
 
@@ -22745,7 +21725,7 @@ window.addEventListener('resize', function() {
                 const modal = document.createElement('div');
                 modal.className = 'modal-overlay';
                 modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-                modal.innerHTML /*XSS-Safe*/ = `
+                modal.innerHTML = `
                     <div class="modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
                             <h2 style="margin: 0;">📊 数据对比分析</h2>
@@ -22843,7 +21823,7 @@ window.addEventListener('resize', function() {
                 const getDiffIcon = (val) => val > 0 ? '📈' : val < 0 ? '📉' : '➡️';
                 const formatDiff = (val) => val > 0 ? '+' + val.toFixed(1) : val.toFixed(1);
 
-                results.innerHTML /*XSS-Safe*/ = `
+                results.innerHTML = `
                     <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
                         <h3 style="margin-bottom: 20px;">对比结果：${date1} vs ${date2}</h3>
 
@@ -22928,7 +21908,7 @@ window.addEventListener('resize', function() {
                 const modal = document.createElement('div');
                 modal.className = 'modal-overlay';
                 modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-                modal.innerHTML /*XSS-Safe*/ = `
+                modal.innerHTML = `
                     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
                             <h2 style="margin: 0;">📝 生成报告</h2>
@@ -22993,7 +21973,7 @@ window.addEventListener('resize', function() {
                 const color = tpi >= 120 ? '#16a34a' : tpi >= 95 ? '#2563eb' : tpi >= 80 ? '#ca8a04' : '#dc2626';
                 const label = tpi >= 120 ? '卓越' : tpi >= 95 ? '稳健' : tpi >= 80 ? '达标' : '需调整';
 
-                preview.innerHTML /*XSS-Safe*/ = `
+                preview.innerHTML = `
                     <h2 style="color: #2563eb; margin-bottom: 20px;">📅 TPI日报 — ${dateStr}</h2>
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                         <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6;">
@@ -23096,7 +22076,7 @@ window.addEventListener('resize', function() {
                 
                 console.log('✅ advancedReportPreview元素存在');
 
-                preview.innerHTML /*XSS-Safe*/ = `
+                preview.innerHTML = `
                     <h2 style="color: #2563eb; margin-bottom: 20px;">📊 TPI周报 — 近7天</h2>
                     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                         <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6;">
@@ -23201,7 +22181,7 @@ window.addEventListener('resize', function() {
                         return;
                     }
 
-                    preview.innerHTML /*XSS-Safe*/ = `
+                    preview.innerHTML = `
                         <h2 style="color: #2563eb; margin-bottom: 20px;">📈 TPI月报 — ${monthName}</h2>
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                             <div style="background: #eff6ff; padding: 16px; border-radius: 8px; border-left: 4px solid #3b82f6;">
@@ -23403,7 +22383,7 @@ window.addEventListener('resize', function() {
                 previewModal.id = 'tpi-preview-modal';
                 previewModal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);';
                 
-                previewModal.innerHTML /*XSS-Safe*/ = `
+                previewModal.innerHTML = `
                     <div style="background:white;width:90%;max-width:920px;max-height:88vh;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
                         <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
                             <h3 style="margin:0;font-size:18px;color:#1e293b;">👁️ 报告预览</h3>
@@ -23520,7 +22500,7 @@ window.addEventListener('resize', function() {
                     backupListHTML += '</div>';
                 }
 
-                modal.innerHTML /*XSS-Safe*/ = `
+                modal.innerHTML = `
                     <div style="background: white; padding: 30px; border-radius: 12px; max-width: 700px; width: 90%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);" onclick="event.stopPropagation()">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
                             <h3 style="margin: 0; color: #111827; display: flex; align-items: center; gap: 10px;">
@@ -23667,7 +22647,7 @@ window.addEventListener('resize', function() {
                 const modal = document.createElement('div');
                 modal.className = 'modal-overlay';
                 modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
-                modal.innerHTML /*XSS-Safe*/ = `
+                modal.innerHTML = `
                     <div class="modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
                             <h2 style="margin: 0;">📈 趋势分析</h2>
@@ -23755,7 +22735,7 @@ window.addEventListener('resize', function() {
                         console.error('[TrendChart] 初始化失败:', error);
                         const chartContainer = document.querySelector('.chart-container');
                         if (chartContainer) {
-                            chartContainer.innerHTML /*XSS-Safe*/ = '<div class="alert alert-warning" style="padding: 20px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px;">⚠️ 趋势图初始化失败<br><br><strong>可能原因：</strong><br>• 数据不足（需要至少一天的数据）<br>• Chart.js库加载失败<br><br><strong>解决方案：</strong><br>• 请确保已填写今日数据<br>• 检查网络连接并刷新页面</div>';
+                            chartContainer.innerHTML = '<div class="alert alert-warning" style="padding: 20px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px;">⚠️ 趋势图初始化失败<br><br><strong>可能原因：</strong><br>• 数据不足（需要至少一天的数据）<br>• Chart.js库加载失败<br><br><strong>解决方案：</strong><br>• 请确保已填写今日数据<br>• 检查网络连接并刷新页面</div>';
                         }
                     }
                 }, 100);
@@ -23795,7 +22775,7 @@ window.addEventListener('resize', function() {
                                 msg.style.cssText = 'padding: 20px; background: #dbeafe; border: 1px solid #3b82f6; border-radius: 8px; text-align: center;';
                                 parent.appendChild(msg);
                             }
-                            msg.innerHTML /*XSS-Safe*/ = '📊 暂无历史数据<br><br>请先在"数据工坊"中填写今日数据，<br>之后即可查看趋势分析。';
+                            msg.innerHTML = '📊 暂无历史数据<br><br>请先在"数据工坊"中填写今日数据，<br>之后即可查看趋势分析。';
                         }
                     })();
                     return;
@@ -23902,7 +22882,7 @@ window.addEventListener('resize', function() {
                                 msg.style.cssText = 'padding: 20px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; text-align: center;';
                                 parent.appendChild(msg);
                             }
-                            msg.innerHTML /*XSS-Safe*/ = '⚠️ Chart.js库未加载，无法显示图表。<br><br>请检查网络连接并刷新页面。';
+                            msg.innerHTML = '⚠️ Chart.js库未加载，无法显示图表。<br><br>请检查网络连接并刷新页面。';
                         }
                     })();
                     }
@@ -23910,7 +22890,7 @@ window.addEventListener('resize', function() {
                     console.error('[TrendChart] Chart.js绘制失败:', chartError);
                     const chartContainer = document.querySelector('.chart-container');
                     if (chartContainer) {
-                        chartContainer.innerHTML /*XSS-Safe*/ = '<div class="alert alert-danger" style="padding: 20px; background: #fee2e2; border: 1px solid #ef4444; border-radius: 8px;">❌ 图表绘制失败: ' + chartError.message + '<br><br>请刷新页面重试。</div>';
+                        chartContainer.innerHTML = '<div class="alert alert-danger" style="padding: 20px; background: #fee2e2; border: 1px solid #ef4444; border-radius: 8px;">❌ 图表绘制失败: ' + chartError.message + '<br><br>请刷新页面重试。</div>';
                     }
                 }
             },
@@ -23988,7 +22968,7 @@ window.addEventListener('resize', function() {
                     if (container) {
                         // 清理旧提示
                         try { container.querySelectorAll('.trendchart-empty-msg,.loading-overlay').forEach(el => el.remove()); } catch(e) {}
-                        container.innerHTML /*XSS-Safe*/ = '<canvas id="trendChartModal" style="max-height: 400px; width: 100%;"></canvas>';
+                        container.innerHTML = '<canvas id="trendChartModal" style="max-height: 400px; width: 100%;"></canvas>';
                         canvas = document.getElementById('trendChartModal');
                     }
                 }
@@ -24010,7 +22990,7 @@ window.addEventListener('resize', function() {
                     const loadingDiv = document.createElement('div');
                     loadingDiv.className = 'loading-overlay';
                     loadingDiv.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;';
-                    loadingDiv.innerHTML /*XSS-Safe*/ = '<div style="text-align: center;"><div style="font-size: 24px; margin-bottom: 10px;">⏳</div><div>正在加载数据...</div></div>';
+                    loadingDiv.innerHTML = '<div style="text-align: center;"><div style="font-size: 24px; margin-bottom: 10px;">⏳</div><div>正在加载数据...</div></div>';
                     canvas.parentElement.style.position = 'relative';
                     canvas.parentElement.appendChild(loadingDiv);
                     
@@ -24702,7 +23682,7 @@ window.addEventListener('resize', function() {
                     const modal = document.createElement('div');
                     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
                     
-                    modal.innerHTML /*XSS-Safe*/ = `
+                    modal.innerHTML = `
                         <div style="background: white; border-radius: 12px; max-width: 800px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
                             <div style="padding: 1.5rem; border-bottom: 1px solid #e5e7eb;">
                                 <h3 style="margin: 0; font-size: 1.25rem;">📄 模板预览</h3>
@@ -24861,7 +23841,7 @@ window.addEventListener('resize', function() {
                 `;
             });
             
-            modal.innerHTML /*XSS-Safe*/ = `
+            modal.innerHTML = `
                 <div style="background: white; border-radius: 12px; max-width: 600px; width: 100%; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
                     <div style="padding: 1.5rem; border-bottom: 1px solid #e5e7eb;">
                         <h3 style="margin: 0; font-size: 1.25rem;">🗑️ 选择要删除的日期</h3>
@@ -24944,7 +23924,7 @@ window.addEventListener('resize', function() {
     'use strict';
 
     // Firebase云端同步增强已移除
-    // 所有Firebase相关功能已废弃,请使用Appwrite云端同步
+    // 所有Firebase相关功能已废弃,请使用GitHub云端同步
 
 })();
   </script>
@@ -25052,7 +24032,7 @@ window.addEventListener('resize', function() {
                         backdrop-filter: blur(10px);
                         animation: slideUpNotification 0.3s ease;
                     `;
-                    orientationTip.innerHTML /*XSS-Safe*/ = `
+                    orientationTip.innerHTML = `
                         <div style="display: flex; flex-direction: column; gap: 12px;">
                             <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px;">
                                 <span style="font-weight: 500;">📱 提示：横屏使用更佳</span>
@@ -26206,7 +25186,7 @@ window.LoadingIndicator = {
                 backdrop-filter: blur(2px);
             `;
 
-            loader.innerHTML /*XSS-Safe*/ = `
+            loader.innerHTML = `
                 <div style="
                     background: white;
                     padding: 30px 40px;
@@ -26454,7 +25434,7 @@ window.TPIAdvanced = {
             // 创建对比分析模态框
             const modal = document.createElement('div');
             modal.id = 'comparison-modal';
-            modal.innerHTML /*XSS-Safe*/ = `
+            modal.innerHTML = `
                 <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                     <div style="background: white; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -26518,7 +25498,7 @@ window.TPIAdvanced = {
         }
         
         const resultsDiv = document.getElementById('comparison-results');
-        resultsDiv.innerHTML /*XSS-Safe*/ = `
+        resultsDiv.innerHTML = `
             <div style="background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
                 <h4 style="margin: 0 0 12px 0; color: #0369a1;">📅 对比周期</h4>
                 <p style="margin: 0; color: #374151;">${startDate} 至 ${endDate}</p>
@@ -26624,7 +25604,7 @@ window.TPIAdvanced = {
             // 创建报告生成模态框
             const modal = document.createElement('div');
             modal.id = 'report-modal';
-            modal.innerHTML /*XSS-Safe*/ = `
+            modal.innerHTML = `
                 <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                     <div style="background: white; border-radius: 12px; padding: 24px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
@@ -26768,7 +25748,7 @@ ${startDate} 至 ${endDate}
             a.click();
             URL.revokeObjectURL(url);
             
-            progressDiv.innerHTML /*XSS-Safe*/ = '<div style="color: #10b981; font-weight: 500;">✅ 报告生成成功！文件已开始下载。</div>';
+            progressDiv.innerHTML = '<div style="color: #10b981; font-weight: 500;">✅ 报告生成成功！文件已开始下载。</div>';
             
             console.log('✅ [TPIAdvanced.executeReportGeneration] 报告生成完成');
             
@@ -27114,7 +26094,7 @@ function updateComparisonTrendChart(days) {
         // 检查Chart.js是否可用
         if (typeof Chart === 'undefined') {
             console.error('[ComparisonTrendChart] Chart.js未加载');
-            canvas.parentElement.innerHTML /*XSS-Safe*/ = '<div style="padding: 20px; text-align: center; color: #6b7280;">Chart.js库未加载，无法显示图表。<br>请确保网络连接正常并刷新页面。</div>';
+            canvas.parentElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #6b7280;">Chart.js库未加载，无法显示图表。<br>请确保网络连接正常并刷新页面。</div>';
             return;
         }
         
@@ -27263,7 +26243,7 @@ function updateComparisonTrendChart(days) {
         console.error('[ComparisonTrendChart] 创建图表失败:', error);
         const canvas = document.getElementById('comparisonTrendChart');
         if (canvas && canvas.parentElement) {
-            canvas.parentElement.innerHTML /*XSS-Safe*/ = '<div style="padding: 20px; text-align: center; color: #ef4444;">图表创建失败: ' + error.message + '<br>请刷新页面重试。</div>';
+            canvas.parentElement.innerHTML = '<div style="padding: 20px; text-align: center; color: #ef4444;">图表创建失败: ' + error.message + '<br>请刷新页面重试。</div>';
         }
     }
 }
@@ -27348,7 +26328,7 @@ window.TemplateSyncManager = {
         const changesContent = document.getElementById('changes-content');
         
         if (changesPreview && changesContent) {
-            changesContent.innerHTML /*XSS-Safe*/ = `
+            changesContent.innerHTML = `
                 <div class="alert alert-info">
                     <h6>📋 预览模式</h6>
                     <p>✅ 预览功能已就绪，等待文件或文本输入</p>
@@ -27513,7 +26493,7 @@ window.TemplateSyncManager = {
             });
             
             alert(`✅ 同步完成\n\n已同步 ${syncCount} 个模板`);
-        // console.log(`✅ [TemplateSyncManager.confirmAndSync] 同步完成: ${syncCount} 个模板`); // [优化8: console.log已清理]
+            console.log(`✅ [TemplateSyncManager.confirmAndSync] 同步完成: ${syncCount} 个模板`);
             
         } catch (error) {
             console.error('同步失败:', error);
@@ -27545,7 +26525,7 @@ window.TemplateSyncManager = {
                 // 更新UI
                 const historyList = document.getElementById('sync-history-list');
                 if (historyList) {
-                    historyList.innerHTML /*XSS-Safe*/ = `
+                    historyList.innerHTML = `
                         <div class="text-center text-muted py-4">
                             <p>暂无同步历史</p>
                             <small>执行第一次同步后,历史记录将显示在这里</small>
@@ -27921,15 +26901,15 @@ console.log('');
 </script>
 <script>
 /* =========================================================
-   [Removed] 旧版云端同步函数兼容层
-   - 已切换为 Appwrite BaaS 后端同步
+   [Removed] GitHub Repo 同步/合并脚本（tpi_db.json 等）
+   - 已切换为 TPI+ 后端同步
 ========================================================= */
 (function(){
   // 兼容旧入口：如果其他脚本仍调用，不报错
-  window.downloadFromAppwrite = window.downloadFromAppwrite || function(){};
-  window.uploadToAppwrite = window.uploadToAppwrite || function(){};
-  window.loadFromAppwrite = window.loadFromAppwrite || function(){};
-  window.syncToAppwrite = window.syncToAppwrite || function(){};
+  window.downloadFromGitHub = window.downloadFromGitHub || function(){};
+  window.uploadToGitHub = window.uploadToGitHub || function(){};
+  window.loadFromGitHub = window.loadFromGitHub || function(){};
+  window.syncToGitHub = window.syncToGitHub || function(){};
 })();
 </script>
 <script>
@@ -28046,7 +27026,7 @@ console.log('');
     // ✅ 如果导航栏标记为静态，则不自动生成（避免覆盖手工维护的导航）
     if(nav.getAttribute('data-static') === '1') return;
 // 清空旧按钮（全部动态生成）
-    nav.innerHTML /*XSS-Safe*/ = '';
+    nav.innerHTML = '';
 
     // ✅ 只抓取“顶层 .card 模块”，确保名称/顺序=页面真实模块，避免把子锚点(tpi-grading-rules 等纯英文 id)塞进导航
     const cards = Array.from(document.querySelectorAll('.card[id]'))
@@ -28082,7 +27062,7 @@ console.log('');
     }
 
     if(cards.length === 0){
-      nav.innerHTML /*XSS-Safe*/ = '<div style="opacity:.85;font-size:12px;padding:6px 8px;">未找到可折叠模块（请确认模块容器为 .card 且包含 .card-content）</div>';
+      nav.innerHTML = '<div style="opacity:.85;font-size:12px;padding:6px 8px;">未找到可折叠模块（请确认模块容器为 .card 且包含 .card-content）</div>';
       return;
     }
 
@@ -28116,7 +27096,7 @@ console.log('');
 
     // 如果全部被过滤掉，给出提示（不影响其他逻辑）
     if(nav.children.length === 0){
-      nav.innerHTML /*XSS-Safe*/ = '<div style="opacity:.85;font-size:12px;padding:6px 8px;">未生成任何模块导航按钮（模块标题疑似缺失或均为纯英文 id）</div>';
+      nav.innerHTML = '<div style="opacity:.85;font-size:12px;padding:6px 8px;">未生成任何模块导航按钮（模块标题疑似缺失或均为纯英文 id）</div>';
     }
 }
 
@@ -28906,7 +27886,7 @@ try{
             canvas.id = 'trendChartModal';
             canvas.style.maxHeight = '400px';
             // clear possible previous content
-            container.innerHTML /*XSS-Safe*/ = '';
+            container.innerHTML = '';
             container.appendChild(canvas);
           }
         }
@@ -29267,7 +28247,7 @@ try{
       const data = getCheckInData();
       const today = new Date();
       
-      calendarGrid.innerHTML /*XSS-Safe*/ = '';
+      calendarGrid.innerHTML = '';
       
       for (let i = 6; i >= 0; i--) {
         const date = new Date(today);
@@ -29293,7 +28273,7 @@ try{
         const weekday = weekdays[date.getDay()];
         const day = date.getDate();
         
-        dayDiv.innerHTML /*XSS-Safe*/ = `
+        dayDiv.innerHTML = `
           <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">周${weekday}</div>
           <div style="font-size: 16px; font-weight: 700;">${day}</div>
           <div style="font-size: 18px; margin-top: 4px;">${hasChecked ? '✅' : '⭕'}</div>
@@ -29707,7 +28687,7 @@ try{
     const emptyEl = els.empty();
     if(!listEl) return;
 
-    listEl.innerHTML /*XSS-Safe*/ = '';
+    listEl.innerHTML = '';
     updateStats(records);
 
     if(els.selectAll()) els.selectAll().checked = false;
@@ -29736,7 +28716,7 @@ try{
         'background:#ffffff','box-shadow:0 6px 16px rgba(2,6,23,.06)'
       ].join(';');
 
-      row.innerHTML /*XSS-Safe*/ = `
+      row.innerHTML = `
         <div style="padding-top:3px;">
           <input type="checkbox" class="misc-log-check" data-id="${escapeHtml(id)}" />
         </div>
@@ -29970,7 +28950,7 @@ try{
                 // 更新评级
                 this.updateRating(tpiTotal);
                 
-        // console.log(`✅ [分数看板] 更新成功: AMI=${amiScore}, BCM=${bcmScore}, LOG=${logisticsScore}, HSM=${hsmScore}, FLI=${fliScore}, BONUS=${bonusScore}, Total=${tpiTotal}`); // [优化8: console.log已清理]
+                console.log(`✅ [分数看板] 更新成功: AMI=${amiScore}, BCM=${bcmScore}, LOG=${logisticsScore}, HSM=${hsmScore}, FLI=${fliScore}, BONUS=${bonusScore}, Total=${tpiTotal}`);
             } catch (error) {
                 console.error('❌ [分数看板] 更新失败:', error);
             }
@@ -29990,10 +28970,10 @@ try{
             const nav = document.getElementById('quickNavV17');
             if (nav) {
                 const buttons = nav.querySelectorAll('.quick-nav-btn-v19');
-        // console.log(`✅ [导航检查] 找到 ${buttons.length} 个导航按钮`); // [优化8: console.log已清理]
+                console.log(`✅ [导航检查] 找到 ${buttons.length} 个导航按钮`);
                 
                 buttons.forEach((btn, index) => {
-        // console.log(`  按钮 #${index + 1}: ${btn.textContent}`); // [优化8: console.log已清理]
+                    console.log(`  按钮 #${index + 1}: ${btn.textContent}`);
                 });
                 
                 if (buttons.length === 0) {
@@ -30023,7 +29003,7 @@ try{
                         }
                     });
                 });
-        // console.log(`✅ [分数监听] 已绑定监听器到: ${id}`); // [优化8: console.log已清理]
+                console.log(`✅ [分数监听] 已绑定监听器到: ${id}`);
             }
         });
     });
@@ -30172,13 +29152,13 @@ try{
       // 监听输入变化（捕获阶段，不影响原有监听器）
       document.addEventListener('input', function(e){
         const t = e && e.target;
-        if (t && t.id && t.id.startsWith('cloud-config-')) return; // 不因配置输入扰动
+        if (t && t.id && t.id.startsWith('github-')) return; // 不因配置输入扰动
         update();
       }, true);
 
       document.addEventListener('change', function(e){
         const t = e && e.target;
-        if (t && t.id && t.id.startsWith('cloud-config-')) return;
+        if (t && t.id && t.id.startsWith('github-')) return;
         update();
       }, true);
 
@@ -30279,9 +29259,9 @@ try{
                 });
 
                 // ----- 强制清空并重新渲染待办区 -----
-                listContainer.innerHTML /*XSS-Safe*/ = '';
+                listContainer.innerHTML = '';
                 if (pending.length === 0) {
-                    listContainer.innerHTML /*XSS-Safe*/ = `<div style="text-align:center; padding:30px 10px; color:#adb5bd;">
+                    listContainer.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#adb5bd;">
                         <div style="font-size:40px; margin-bottom:10px;">🏝️</div>
                         <div>当前无待办事件</div>
                         <div style="font-size:12px; margin-top:5px;">享受这段清空的时光吧！</div>
@@ -30295,9 +29275,9 @@ try{
 
                 // ----- 已完成区（保留折叠功能）-----
                 if (doneContainer) {
-                    doneContainer.innerHTML /*XSS-Safe*/ = '';
+                    doneContainer.innerHTML = '';
                     if (done.length > 0) {
-                        doneContainer.innerHTML /*XSS-Safe*/ = `<div style="padding:10px; font-weight:600; color:#6b7280; font-size:12px; cursor:pointer; border-top:1px dashed #e5e7eb; margin-top:5px;" onclick="this.parentElement.classList.toggle('collapsed')">✅ 已完成 (${done.length}) <span style="font-size:10px; opacity:0.7;">(点击展开/折叠)</span> ▼</div>`;
+                        doneContainer.innerHTML = `<div style="padding:10px; font-weight:600; color:#6b7280; font-size:12px; cursor:pointer; border-top:1px dashed #e5e7eb; margin-top:5px;" onclick="this.parentElement.classList.toggle('collapsed')">✅ 已完成 (${done.length}) <span style="font-size:10px; opacity:0.7;">(点击展开/折叠)</span> ▼</div>`;
                         done.forEach(item => doneContainer.innerHTML += this.createCardHtml(key, item));
                     }
                 }
@@ -30371,10 +29351,10 @@ try{
             }
         };
 
-        // ---------- 4. 劫持 downloadFromAppwrite，下载后自动刷新雷达 ----------
-        const originalDownload = window.downloadFromAppwrite;
+        // ---------- 4. 劫持 downloadFromGitHub，下载后自动刷新雷达 ----------
+        const originalDownload = window.downloadFromGitHub;
         if (typeof originalDownload === 'function') {
-            window.downloadFromAppwrite = async function(...args) {
+            window.downloadFromGitHub = async function(...args) {
                 try {
                     const result = await originalDownload.apply(this, args);
                     setTimeout(() => {
@@ -30735,15 +29715,15 @@ window.__tpi_syncDateToMain = function(){
         payload[k] = localStorage.getItem(k);
       }
       const dataStr = JSON.stringify(payload);
-        // console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`); // [优化8: console.log已清理]
+      console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`);
 
       // 3) 写入 Appwrite（字段必须匹配：data(longtext string) + userId + date）
       console.log('🔐 [上传] 正在获取用户认证...');
       const user = await __tpi_getAuth();
       const userId = user.$id;
       const docId = __tpi_makeDocId(userId, dateStr);
-        // console.log(`🆔 [上传] 用户ID: ${userId}`); // [优化8: console.log已清理]
-        // console.log(`📝 [上传] 文档ID: ${docId}`); // [优化8: console.log已清理]
+      console.log(`🆔 [上传] 用户ID: ${userId}`);
+      console.log(`📝 [上传] 文档ID: ${docId}`);
 
       const docData = { data: dataStr, userId, date: dateStr };
 
@@ -30763,7 +29743,7 @@ window.__tpi_syncDateToMain = function(){
       }
 
       const __upload_end_time = Date.now();
-        // console.log(`⏱️ [上传] 总耗时: ${__upload_end_time - __upload_start_time}ms`); // [优化8: console.log已清理]
+      console.log(`⏱️ [上传] 总耗时: ${__upload_end_time - __upload_start_time}ms`);
       
       // 计算更详细的统计信息
       const dataSizeKB = (dataStr.length / 1024).toFixed(2);
@@ -30775,11 +29755,11 @@ window.__tpi_syncDateToMain = function(){
       
       console.log('✅ ═════════════════════════════════════════════════════');
       console.log('✅ [云同步] 上传成功');
-        // console.log(`📅 同步日期: ${dateStr}`); // [优化8: console.log已清理]
-        // console.log(`🆔 文档ID: ${docId}`); // [优化8: console.log已清理]
-        // console.log(`📦 localStorage条目: ${Object.keys(payload).length} 个`); // [优化8: console.log已清理]
-        // console.log(`💾 数据大小: ${dataStr.length} 字符 (${dataSizeKB} KB / ${dataSizeMB} MB)`); // [优化8: console.log已清理]
-        // console.log(`⏰ 上传时间: ${uploadTime}`); // [优化8: console.log已清理]
+      console.log(`📅 同步日期: ${dateStr}`);
+      console.log(`🆔 文档ID: ${docId}`);
+      console.log(`📦 localStorage条目: ${Object.keys(payload).length} 个`);
+      console.log(`💾 数据大小: ${dataStr.length} 字符 (${dataSizeKB} KB / ${dataSizeMB} MB)`);
+      console.log(`⏰ 上传时间: ${uploadTime}`);
       console.log('✅ ═════════════════════════════════════════════════════');
 
       showModal?.({
@@ -30822,18 +29802,18 @@ window.__tpi_syncDateToMain = function(){
       const user = await __tpi_getAuth();
       const userId = user.$id;
       const docId = __tpi_makeDocId(userId, dateStr);
-        // console.log(`🆔 [上传] 用户ID: ${userId}`); // [优化8: console.log已清理]
-        // console.log(`📝 [上传] 文档ID: ${docId}`); // [优化8: console.log已清理]
+      console.log(`🆔 [上传] 用户ID: ${userId}`);
+      console.log(`📝 [上传] 文档ID: ${docId}`);
 
       const doc = await databases.getDocument(DATABASE_ID, COLLECTION_ID, docId);
 
       // 解析云端 data
       let payload = {};
-        // console.log(`📦 [下载] 文档数据大小: ${doc.data ? doc.data.length : 0} 字节`); // [优化8: console.log已清理]
+      console.log(`📦 [下载] 文档数据大小: ${doc.data ? doc.data.length : 0} 字节`);
       try{
         payload = JSON.parse(doc.data || '{}');
-        // console.log(`✅ [下载] JSON解析成功`); // [优化8: console.log已清理]
-        // console.log(`📊 [下载] 数据结构分析: ${Object.keys(payload).length} 个字段`); // [优化8: console.log已清理]
+        console.log(`✅ [下载] JSON解析成功`);
+        console.log(`📊 [下载] 数据结构分析: ${Object.keys(payload).length} 个字段`);
       }catch(e){
         console.error('❌ [下载] JSON解析失败:', e);
         throw new Error('云端数据解析失败（data 不是有效 JSON 字符串）');
@@ -30845,7 +29825,7 @@ window.__tpi_syncDateToMain = function(){
       for(const [k,v] of Object.entries(payload)){
         localStorage.setItem(k, v);
       }
-        // console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`); // [优化8: console.log已清理]
+      console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
       // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
@@ -30861,7 +29841,7 @@ window.__tpi_syncDateToMain = function(){
       }
 
       const __download_end_time = Date.now();
-        // console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`); // [优化8: console.log已清理]
+      console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
 
       // 计算更详细的统计信息
       const afterKeys = localStorage.length;
@@ -30874,12 +29854,12 @@ window.__tpi_syncDateToMain = function(){
       
       console.log('📥 ═════════════════════════════════════════════════════');
       console.log('📥 [云同步] 下载成功');
-        // console.log(`📅 同步日期: ${dateStr}`); // [优化8: console.log已清理]
-        // console.log(`🆔 文档ID: ${docId}`); // [优化8: console.log已清理]
-        // console.log(`📦 写入条目: ${Object.keys(payload).length} 个 localStorage 键`); // [优化8: console.log已清理]
-        // console.log(`💾 数据大小: ${dataSizeBytes} 字节 (${dataSizeKB} KB)`); // [优化8: console.log已清理]
-        // console.log(`🔄 localStorage键数变化: ${beforeKeys} → ${afterKeys}`); // [优化8: console.log已清理]
-        // console.log(`⏰ 下载时间: ${downloadTime}`); // [优化8: console.log已清理]
+      console.log(`📅 同步日期: ${dateStr}`);
+      console.log(`🆔 文档ID: ${docId}`);
+      console.log(`📦 写入条目: ${Object.keys(payload).length} 个 localStorage 键`);
+      console.log(`💾 数据大小: ${dataSizeBytes} 字节 (${dataSizeKB} KB)`);
+      console.log(`🔄 localStorage键数变化: ${beforeKeys} → ${afterKeys}`);
+      console.log(`⏰ 下载时间: ${downloadTime}`);
       console.log('📥 ═════════════════════════════════════════════════════');
 
       showModal?.({
@@ -31470,7 +30450,7 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
         gap: 8px;
         transition: all 0.3s;
       `;
-      indicator.innerHTML /*XSS-Safe*/ = `
+      indicator.innerHTML = `
         <span id="save-icon">💾</span>
         <span id="save-text">自动保存已启用</span>
       `;
@@ -31574,7 +30554,7 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
         align-items: center;
         gap: 8px;
       `;
-      this.indicator.innerHTML /*XSS-Safe*/ = `
+      this.indicator.innerHTML = `
         <span style="font-size: 20px;">⚠️</span>
         <span>离线模式 - 数据仅保存在本地</span>
       `;
@@ -31604,7 +30584,7 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
         const queue = __tpi_ls_get('tpi_sync_queue');
         if (queue) {
           this.syncQueue = JSON.parse(queue);
-        // console.log(`📦 [网络监控] 加载了 ${this.syncQueue.length} 个待同步操作`); // [优化8: console.log已清理]
+          console.log(`📦 [网络监控] 加载了 ${this.syncQueue.length} 个待同步操作`);
         }
       } catch (e) {
         console.warn('⚠️ [网络监控] 加载同步队列失败:', e);
@@ -31614,7 +30594,7 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
     async processSyncQueue() {
       if (this.syncQueue.length === 0) return;
       
-        // console.log(`📤 [网络监控] 开始处理 ${this.syncQueue.length} 个待同步操作`); // [优化8: console.log已清理]
+      console.log(`📤 [网络监控] 开始处理 ${this.syncQueue.length} 个待同步操作`);
       
       const queue = [...this.syncQueue];
       this.syncQueue = [];
@@ -31767,7 +30747,7 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
         const saved = __tpi_ls_get('tpi_error_log');
         if (saved) {
           this.errorLog = JSON.parse(saved);
-        // console.log(`📋 [错误处理] 加载了 ${this.errorLog.length} 条历史错误记录`); // [优化8: console.log已清理]
+          console.log(`📋 [错误处理] 加载了 ${this.errorLog.length} 条历史错误记录`);
         }
       } catch (e) {
         console.warn('⚠️ [错误处理] 无法加载错误日志:', e);
@@ -31801,7 +30781,7 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
         if (duration > 500) {
           console.warn(`⚠️ [性能] ${name} 耗时 ${duration.toFixed(2)}ms`);
         } else {
-        // console.log(`⏱️ [性能] ${name} 耗时 ${duration.toFixed(2)}ms`); // [优化8: console.log已清理]
+          console.log(`⏱️ [性能] ${name} 耗时 ${duration.toFixed(2)}ms`);
         }
       }
     },
@@ -32052,7 +31032,7 @@ window.TPILoader = {
     
     var loader = document.createElement('div');
     loader.id = 'tpi-loader';
-    loader.innerHTML /*XSS-Safe*/ = `
+    loader.innerHTML = `
       <div style="
         position: fixed;
         top: 0; left: 0; right: 0; bottom: 0;
@@ -32210,304 +31190,5 @@ console.log('✅ [TPI优化] 函数增强包装器已加载');
 </script>
 
 
-
-<script>
-/* =========================================================
-   ✅ 导出/备份/报告“真实性 + 全量性 + 当天日期”强制校验补丁 (2026-02-14)
-   目标（对应你的 3 点要求）：
-   1) 任意导出/备份文件：必须包含“当前输入/勾选 + 规则生成的真实分数/评级/图表等”
-   2) 分数/评级/图表：必须基于真实数据即时计算（不允许模拟）
-   3) 页面默认日期：必须是“打开网页当天的真实日期”（本地时区）
-========================================================= */
-(function(){
-  // ---------- 1) 强制当天日期（本地时区） ----------
-  function localToday(){
-    try{
-      const d = new Date();
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth()+1).padStart(2,'0');
-      const dd = String(d.getDate()).padStart(2,'0');
-      return `${yyyy}-${mm}-${dd}`;
-    }catch(e){ return ''; }
-  }
-
-  function forceToday(){
-    try{
-      const di = document.getElementById('date-input');
-      if (!di) return;
-      const today = localToday();
-      if (!today) return;
-      // ✅ 这里按你的要求：打开网页时，默认就是“当天真实日期”
-      di.value = today;
-    }catch(e){}
-  }
-
-  // 立即执行 + DOM就绪后再执行一次（防止后续脚本覆盖）
-  try{ forceToday(); }catch(e){}
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', ()=>{ try{ forceToday(); }catch(e){} }, {once:true});
-  } else {
-    setTimeout(()=>{ try{ forceToday(); }catch(e){} }, 0);
-  }
-
-  // ---------- 2) 强制“真实计算”并采集图表/规则生成内容 ----------
-  function safeCall(fn){
-    try{ if (typeof fn === 'function') return fn(); }catch(e){}
-    return undefined;
-  }
-
-  // 触发规则重算（分数/评级/徽章/统计等）
-  function triggerRealRecalc(){
-    // 你文件里已有 __tpi_triggerRecalc / scoreUpdateManager 等，这里做“多重兜底”
-    try{ safeCall(window.__tpi_triggerRecalc); }catch(e){}
-    try{
-      if (window.scoreUpdateManager && typeof window.scoreUpdateManager.triggerUpdate === 'function') {
-        window.scoreUpdateManager.triggerUpdate();
-      }
-    }catch(e){}
-    try{
-      if (window.TPI && typeof window.TPI.calculateTPI === 'function') window.TPI.calculateTPI();
-    }catch(e){}
-  }
-
-  // 采集 canvas 图表（PNG dataURL）
-  function captureCanvasCharts(){
-    const out = {};
-    try{
-      const canvases = document.querySelectorAll('canvas');
-      canvases.forEach((c, i)=>{
-        try{
-          const id = c.id ? c.id : `canvas_${i}`;
-          // 避免某些浏览器因跨域污染/安全异常导致导出失败
-          let dataUrl = '';
-          try{
-            if (typeof c.toDataURL === 'function') dataUrl = c.toDataURL('image/png');
-          }catch(e){ dataUrl = ''; }
-          out[id] = {
-            width: c.width || null,
-            height: c.height || null,
-            pngDataUrl: dataUrl || ''
-          };
-        }catch(e){}
-      });
-    }catch(e){}
-    return out;
-  }
-
-  // 采集“规则生成的关键展示值”（保证导出时带上真实分数/评级等）
-  function captureDerivedViewValues(){
-    const ids = [
-      'tpi-total','total-score','rating-display','tpi-rating',
-      'morning-score','afternoon-score','evening-score','night-score',
-      'ma7-score','ami-score','fli-score','sys-score','bonus-score'
-    ];
-    const res = {};
-    ids.forEach(id=>{
-      try{
-        const el = document.getElementById(id);
-        if (!el) return;
-        const tag = (el.tagName||'').toLowerCase();
-        if (tag === 'input' || tag === 'textarea' || tag === 'select') {
-          res[id] = el.value;
-        } else {
-          res[id] = (el.textContent||'').trim();
-        }
-      }catch(e){}
-    });
-    return res;
-  }
-
-  // ---------- 3) 统一生成“全量快照”对象 ----------
-  function buildFullSnapshot(){
-    triggerRealRecalc();
-
-    // ✅ 以你已经实现的 collectDailyData 为主（它已打包 _formState / _viewState 等）
-    let snapObj = {};
-    try{
-      if (typeof window.collectDailyData === 'function') snapObj = window.collectDailyData() || {};
-    }catch(e){ snapObj = {}; }
-
-    // dateKey
-    let dateKey = Object.keys(snapObj)[0];
-    if (!dateKey){
-      try{
-        const di = document.getElementById('date-input');
-        dateKey = (di && di.value) ? di.value : localToday();
-      }catch(e){ dateKey = localToday(); }
-    }
-
-    const dayData = (dateKey && snapObj[dateKey] && typeof snapObj[dateKey]==='object') ? snapObj[dateKey] : {};
-
-    // ✅ 强制补上图表与关键派生值（用于“导出/备份必须包含图表、分数、评级等”）
-    try{
-      dayData._charts = captureCanvasCharts();
-      dayData._derived = captureDerivedViewValues();
-      dayData._exportedAt = new Date().toISOString();
-      dayData._exportDate = dateKey;
-    }catch(e){}
-
-    return {
-      schema: "tpi_export_v3_full",
-      exportedAt: new Date().toISOString(),
-      date: dateKey,
-      data: dayData
-    };
-  }
-
-  // ---------- 4) 统一导出函数：JSON / Markdown / 兼容旧入口 ----------
-  function download(filename, content, mime){
-    const blob = new Blob([content], {type: mime || 'application/octet-stream'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(()=>{ try{ URL.revokeObjectURL(a.href); }catch(e){} }, 1200);
-  }
-
-  function toast(msg, type){
-    try{
-      if (window.showNotification) return window.showNotification(msg, type||'info');
-      if (window.tpiToast) return window.tpiToast(msg, type||'info');
-      if (window.showToast) return window.showToast(msg, type||'info');
-    }catch(e){}
-    try{ alert(msg); }catch(e){}
-  }
-
-  function toMarkdown(exp){
-    const d = exp && exp.date ? exp.date : '';
-    const t = exp && exp.exportedAt ? exp.exportedAt : '';
-    const lines = [];
-    lines.push(`# TPI 全量导出（Markdown）`);
-    lines.push(`- 日期：${d}`);
-    lines.push(`- 导出时间：${t}`);
-    lines.push('');
-    lines.push(`> 本文件包含：当前输入/勾选、规则生成的真实分数/评级、以及图表 PNG（base64）。`);
-    lines.push('');
-    // 摘要
-    const dd = (exp && exp.data) ? exp.data : {};
-    const derived = dd._derived || {};
-    const tpi = derived['tpi-total'] || derived['total-score'] || '';
-    const rating = derived['rating-display'] || derived['tpi-rating'] || '';
-    if (tpi || rating){
-      lines.push('## 计分概览（来自页面实时计算）');
-      if (tpi) lines.push(`- TPI：**${tpi}**`);
-      if (rating) lines.push(`- 评级：**${rating}**`);
-      lines.push('');
-    }
-    // 图表列表（仅列出有图的）
-    try{
-      const charts = dd._charts || {};
-      const keys = Object.keys(charts);
-      if (keys.length){
-        lines.push('## 图表（PNG base64）');
-        keys.forEach(k=>{
-          const it = charts[k] || {};
-          if (it.pngDataUrl){
-            lines.push(`- ${k}: ${it.width||''}x${it.height||''}`);
-          }
-        });
-        lines.push('');
-      }
-    }catch(e){}
-    // 全量 JSON
-    lines.push('## 完整快照 JSON（100%复现）');
-    lines.push('```json');
-    lines.push(JSON.stringify(exp, null, 2));
-    lines.push('```');
-    lines.push('');
-    return lines.join('\n');
-  }
-
-  // ✅ 覆盖/统一：exportCurrentSnapshot（你的页面很多按钮已指向这个）
-  window.exportCurrentSnapshot = function(format){
-    try{
-      const exp = buildFullSnapshot();
-      const safeDate = String(exp.date||localToday()||'unknown').replace(/[^0-9\-]/g,'');
-      const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
-
-      if (format === 'markdown' || format === 'md'){
-        download(`TPI_${safeDate}_${ts}.md`, toMarkdown(exp), 'text/markdown;charset=utf-8');
-      } else {
-        download(`TPI_${safeDate}_${ts}.json`, JSON.stringify(exp, null, 2), 'application/json;charset=utf-8');
-      }
-
-      try{ __tpi_ls_set('tpi_last_manual_backup', String(Date.now())); }catch(e){}
-      toast('✅ 导出成功：已包含当前输入/勾选 + 真实分数/评级 + 图表PNG', 'success');
-      return true;
-    }catch(e){
-      console.error('[exportCurrentSnapshot v3] failed:', e);
-      toast('❌ 导出失败：请查看控制台错误信息', 'error');
-      return false;
-    }
-  };
-
-  // ✅ 兼容：旧入口全部转发到“全量导出”
-  window.exportTpiDataComplete = function(){ return window.exportCurrentSnapshot('json'); };
-  window.exportDataComplete = function(fmt){ return window.exportCurrentSnapshot(fmt === 'markdown' ? 'markdown' : 'json'); };
-
-  // ✅ 兼容：云端为主 legacy 导出（原先只导出配置，会违反你的要求）
-  window.__tpi_legacy_exportAsJSON_1 = function(){ return window.exportCurrentSnapshot('json'); };
-  window.__tpi_legacy_exportDataComplete_1 = function(){ return window.exportCurrentSnapshot('json'); };
-
-  // ✅ 兼容：如果页面存在“无参数版”的导出按钮（window.exportAsJSON / CSV / Excel / Markdown）
-  // 说明：CSV/Excel 在“全量快照”层面很难无损表达图表，因此这里按你的要求：
-  // - CSV/Excel 导出：自动改为导出 JSON 全量快照（保证不丢图表/评分/规则内容）
-  window.exportAsJSON = function(){ return window.exportCurrentSnapshot('json'); };
-  window.exportAsMarkdown = function(){ return window.exportCurrentSnapshot('markdown'); };
-  window.exportAsCSV = function(){ return window.exportCurrentSnapshot('json'); };
-  window.exportAsExcel = function(){ return window.exportCurrentSnapshot('json'); };
-
-})();
-</script>
-
-<script>
-(function(){
-  function initBonusClickFallback(){
-    const root = document.getElementById('bonus');
-    if(!root) return;
-
-    // 兼容：不要只限定在 .alert 内，#bonus 下所有包含 bonus-item 的 label 都做可点击兜底
-    const labels = Array.from(root.querySelectorAll('label')).filter(lb=>{
-      return lb.querySelector('input[type="checkbox"][name="bonus-item"]');
-    });
-
-    labels.forEach(lb=>{
-      const cb = lb.querySelector('input[type="checkbox"][name="bonus-item"]');
-      if(!cb) return;
-
-      // 防止 CSS/覆盖导致的不可点（兜底开启指针事件）
-      try{ lb.style.pointerEvents = 'auto'; }catch(e){}
-      try{ cb.style.pointerEvents = 'auto'; }catch(e){}
-
-      // 兜底：点击 label 内任意位置都能切换（避免个别浏览器/覆盖导致“点了没反应”）
-      lb.addEventListener('click', function(e){
-        const t = e.target;
-
-        // 若 disabled，则保持不可交互（避免破坏其他模块的禁用逻辑）
-        if (cb.disabled) return;
-
-        // 若直接点到 checkbox，本身会切换，交给浏览器即可
-        if (t === cb) return;
-
-        // 若点到链接/按钮/输入框等，避免误触
-        if (t && (t.closest('a,button,textarea,select,input[type="text"],input[type="number"],input[type="date"]'))) return;
-
-        // 手动切换并触发原 onchange 逻辑
-        cb.checked = !cb.checked;
-        cb.dispatchEvent(new Event('change', {bubbles:true}));
-      }, {capture:true});
-    });
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initBonusClickFallback, {once:true});
-  } else {
-    initBonusClickFallback();
-  }
-})();
-</script>
 </body>
 </html>
