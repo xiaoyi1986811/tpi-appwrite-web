@@ -2967,25 +2967,14 @@ window.exportReportComplete = function(format) {
 
 // 2. 从云端加载函数 - 现在使用GitHub云端同步
 window.loadFromCloudComplete = function() {
-    console.log('🔵 [loadFromCloudComplete] 从云端加载功能被调用');
-    console.log('🔵 [loadFromCloudComplete] 执行时间:', new Date().toLocaleString());
-    
-    try {
-        // Firebase已移除，现在使用GitHub云端同步
-        console.log('🔍 [loadFromCloudComplete] 使用GitHub云端同步方式');
-        
-        // 检查GitHub加载函数是否可用
-        if (window.loadFromGitHub && typeof window.loadFromGitHub === 'function') {
-            console.log('✅ [loadFromCloudComplete] 调用GitHub加载功能');
-            window.loadFromGitHub();
-        } else {
-            console.warn('⚠️ [loadFromCloudComplete] GitHub加载功能未初始化');
-            alert('⚠️ GitHub云端同步功能初始化中\n\n请稍等片刻后重试\n\n如果持续出现此问题，请刷新页面');
-        }
-    } catch (error) {
-        console.error('❌ [loadFromCloudComplete] 从云端加载失败:', error);
-        console.error('❌ [loadFromCloudComplete] 错误堆栈:', error.stack);
-        alert('❌ 加载失败\n\n错误信息: ' + error.message + '\n\n请查看控制台获取详细信息');
+    console.warn('Legacy入口 loadFromCloudComplete 已弃用，自动转为 Appwrite 下载');
+    try{
+      if (typeof window.tpiLoadToday === 'function') return window.tpiLoadToday();
+      if (typeof window.loadFromCloud === 'function') return window.loadFromCloud();
+      alert('❌ 下载功能未就绪：tpiLoadToday/loadFromCloud 均不可用');
+    }catch(e){
+      console.error('❌ [loadFromCloudComplete->Appwrite] 失败:', e);
+      alert('❌ 下载失败：' + (e?.message || e));
     }
 };
 
@@ -29692,6 +29681,7 @@ window.__tpi_syncDateToMain = function(){
     const safeUser = String(userId||'').replace(/[^a-zA-Z0-9_\-]/g,'_');
     const safeDate = String(dateStr||'').replace(/[^0-9\-]/g,'_');
     return `${safeUser}_${safeDate}`;
+  }
 
   // ---------- 2.1) 额外：全页面表单快照（用于补足 collectFormData 未覆盖的字段） ----------
   function __tpi_collectDomSnapshot(){
