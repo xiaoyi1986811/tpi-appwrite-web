@@ -4459,83 +4459,6 @@ window.exportAsCSV = function() {
     console.log('✅ exportDataComplete 可用性:', typeof exportDataComplete);
 }; // 修复: 添加缺失的闭合括号
   </script>
-<style id="top-scoreboard-style">
-    .top-scoreboard{
-      position: sticky;
-      top: 0;
-      z-index: 5000;
-      background: linear-gradient(135deg, rgba(224,231,255,.95) 0%, rgba(221,214,254,.95) 100%);
-      border-bottom: 1px solid rgba(148,163,184,.35);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.06);
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-    }
-    .top-scoreboard-inner{
-      max-width: 1400px;
-      margin: 0 auto;
-      padding: 8px 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      gap: 10px;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-    }
-    .top-scoreboard-inner::-webkit-scrollbar{ height: 6px; }
-    .top-scoreboard-inner::-webkit-scrollbar-thumb{ background: rgba(148,163,184,.45); border-radius: 999px; }
-    .ts-item{
-      display: inline-flex;
-      align-items: baseline;
-      gap: 6px;
-      padding: 5px 10px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.55);
-      border: 1px solid rgba(148,163,184,.25);
-      white-space: nowrap;
-    }
-    .ts-label{ font-size: 11px; opacity: .9; }
-    .ts-value{ font-size: 16px; font-weight: 800; letter-spacing: .2px; }
-    .ts-sep{ width: 1px; height: 18px; background: rgba(148,163,184,.35); }
-    .ts-grow{ display:none; flex:0 0 0; width:0; }
-    .ts-total{
-      display: inline-flex;
-      align-items: baseline;
-      gap: 8px;
-      padding: 6px 12px;
-      border-radius: 12px;
-      background: rgba(37,99,235,.10);
-      border: 1px solid rgba(37,99,235,.18);
-      white-space: nowrap;
-    }
-    .ts-total-label{ font-size: 11px; opacity: .9; }
-    .ts-total-value{ font-size: 18px; font-weight: 900; }
-    .ts-rating{
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 6px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 800;
-      border: 1px solid rgba(148,163,184,.25);
-      background: rgba(255,255,255,0.65);
-      white-space: nowrap;
-    }
-    .ts-rating.is-excellent{ background: rgba(16,185,129,.18); border-color: rgba(16,185,129,.25); }
-    .ts-rating.is-steady{ background: rgba(59,130,246,.18); border-color: rgba(59,130,246,.25); }
-    .ts-rating.is-baseline{ background: rgba(245,158,11,.20); border-color: rgba(245,158,11,.25); }
-    .ts-rating.is-maintenance{ background: rgba(107,114,128,.18); border-color: rgba(107,114,128,.25); }
-    .ts-rating.is-overload{ background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.25); }
-
-    /* 小屏更紧凑 */
-    @media (max-width: 520px){
-      .top-scoreboard-inner{ padding: 8px 10px; }
-      .ts-item{ padding: 5px 8px; border-radius: 9px; }
-      .ts-value{ font-size: 15px; }
-      .ts-total-value{ font-size: 17px; }
-    }
-  </style>
 <style id="tpi-v6-final-semantic-css">
 /* V6 Final Patch — Semantic CSS + Inline Cleanup (safe static only) */
 /* NOTE: These utility classes are generated from repeated inline styles that contain no layout-critical props (no position/display/z-index/size). */
@@ -4590,26 +4513,6 @@ window.exportAsCSV = function() {
 .tpi-u-mt-varspacing4{margin-top: var(--spacing-4);}
 </style></head>
 <body>
-<!-- ========== 顶部分数看板（与TPI仪表盘/实时分数同步） ========== -->
-<div aria-label="顶部分数看板" class="top-scoreboard" id="top-scoreboard">
-<div class="top-scoreboard-inner">
-<div class="ts-item"><span class="ts-label">📉 MA7</span><span class="ts-value" id="ts-ma7">0.0</span></div>
-<div aria-hidden="true" class="ts-sep"></div>
-<div class="ts-item"><span class="ts-label">📝 AMI</span><span class="ts-value" id="ts-ami">0.0</span></div>
-<div aria-hidden="true" class="ts-sep"></div>
-<div class="ts-item"><span class="ts-label">🧠 FLI</span><span class="ts-value" id="ts-fli">0.0</span></div>
-<div aria-hidden="true" class="ts-sep"></div>
-<div class="ts-item"><span class="ts-label">🧱 SYS</span><span class="ts-value" id="ts-sys">0.0</span></div>
-<div aria-hidden="true" class="ts-sep"></div>
-<div class="ts-item"><span class="ts-label">🎁 BONUS</span><span class="ts-value" id="ts-bonus">0.0</span></div>
-<div class="ts-grow"></div>
-<div class="ts-total">
-<span class="ts-total-label">总分</span>
-<span class="ts-total-value" id="ts-total">0.0</span>
-</div>
-<div class="ts-rating" id="ts-rating" title="评级">—</div>
-</div>
-</div>
 <!-- ========== 增强导航系统 第 20 版 ========== -->
 <!-- PWA模式指示器 -->
 <div class="pwa-indicator-v19" id="pwaIndicator" style="display:none">
@@ -29115,169 +29018,93 @@ try{
         total = null;
       } else if (totalEl && (totalRaw === '' || !hasNumeric)){
         // 空/缺失：兜底为 sum（仅用于显示，不回写业务字段）
-        total = sum;
-      } else {
-        // 正常数值（包括 0）：完全信任业务
-        total = totalNum;
-      }
-
-      setText('ts-ma7', ma7);
-      setText('ts-ami', ami);
-      setText('ts-fli', fli);
-      setText('ts-sys', sys);
-      setText('ts-bonus', bonus);
-
-      // 总分显示：若业务总分为非数字（如 PAUSED），则原样显示；否则按数值显示
-      if (total === null){
-        const el = document.getElementById('ts-total');
-        if (el) el.textContent = totalRaw || '—';
-      } else {
-        setText('ts-total', total);
-      }
-
-      setRatingPill(getRatingText(), (total === null ? 0 : total));
-
-      // 若页面仍存在旧 ScoreDashboard（其他模板/导出用），则顺便更新，保持一致（不强制）
-      try{
-        if (window.ScoreDashboard && typeof window.ScoreDashboard.update === 'function'){
-          window.ScoreDashboard.update();
-        }
-      }catch(e){}
-    }
-
-    function init(){
-      // 初始刷新
-      update();
-
-      // 监听输入变化（捕获阶段，不影响原有监听器）
-      document.addEventListener('input', function(e){
-        const t = e && e.target;
-        if (t && t.id && t.id.startsWith('github-')) return; // 不因配置输入扰动
-        update();
-      }, true);
-
-      document.addEventListener('change', function(e){
-        const t = e && e.target;
-        if (t && t.id && t.id.startsWith('github-')) return;
-        update();
-      }, true);
-
-      // 兜底轮询：覆盖“脚本写值但不触发事件”的情况
-      setInterval(update, 1200);
-
-      // 如果存在 TPI.calculateTPI，则包装：每次算分后更新看板（只包一次）
-      const tryWrap = function(){
-        try{
-          if (!window.TPI || typeof window.TPI.calculateTPI !== 'function') return false;
-          if (window.TPI.__topScoreboardWrapped__) return true;
-          const old = window.TPI.calculateTPI;
-          window.TPI.calculateTPI = function(){
-            const r = old.apply(this, arguments);
-            try{ update(); }catch(e){}
-            return r;
-          };
-          window.TPI.__topScoreboardWrapped__ = true;
-          return true;
-        }catch(e){ return false; }
-      };
-      if (!tryWrap()){
-        // 等待业务对象挂载
-        const timer = setInterval(function(){
-          if (tryWrap()) clearInterval(timer);
-        }, 400);
-        setTimeout(function(){ clearInterval(timer); }, 15000);
-      }
-    }
-
-    if (document.readyState === 'loading'){
-      document.addEventListener('DOMContentLoaded', init, { once:true });
-    } else {
-      init();
-    }
-
-    // 暴露给调试/其他模块（可选）
-    window.TopScoreboard = { update };
-  })();
-  </script>
-<!-- ========== 未来事件雷达渲染修复补丁 v1.0 ========== -->
-<!-- 解决：下载后计数正常但列表空白，增强渲染稳定性 -->
+        tota
 <script>
-(function() {
-    'use strict';
-    console.log('[雷达修复] 正在应用强制渲染补丁...');
+/* =========================================================
+   卡片式分数看板 + TPI仪表盘 实时同步补丁（移除顶部分数条后）
+   - 不改业务算分逻辑
+   - 每次算分/恢复/输入变化后，主动刷新 ScoreDashboard（卡片式看板）
+   - 保留原有 3s 兜底轮询（若存在）
+========================================================= */
+(function(){
+  'use strict';
 
-    // 等待 FutureRadar 对象就绪
-    function waitForFutureRadar(callback) {
-        if (window.FutureRadar && typeof window.FutureRadar.renderSection === 'function') {
-            callback();
-            return;
+  function safeUpdate(){
+    try{
+      if (window.ScoreDashboard && typeof window.ScoreDashboard.update === 'function') {
+        window.ScoreDashboard.update();
+      }
+    }catch(e){}
+
+    // 尝试触发 TPI 仪表盘可能存在的“刷新函数”（若版本内实现了就调用；没有就忽略）
+    try{
+      const T = window.TPI;
+      if (T && typeof T === 'object'){
+        const candidates = ['updateTPIDashboard','updateDashboard','renderDashboard','updateAllDisplays','updateStatistics'];
+        for (let i=0;i<candidates.length;i++){
+          const fn = candidates[i];
+          if (typeof T[fn] === 'function'){
+            try{ T[fn](); }catch(_e){}
+            break;
+          }
         }
-        const timer = setInterval(() => {
-            if (window.FutureRadar && typeof window.FutureRadar.renderSection === 'function') {
-                clearInterval(timer);
-                callback();
-            }
-        }, 100);
-        setTimeout(() => clearInterval(timer), 10000);
+      }
+    }catch(e){}
+  }
+
+  function wrapCalculate(){
+    try{
+      const T = window.TPI;
+      if (!T || typeof T.calculateTPI !== 'function') return false;
+      if (T.__cardDashboardWrapped__) return true;
+
+      const old = T.calculateTPI;
+      T.calculateTPI = function(){
+        const r = old.apply(this, arguments);
+        try{ safeUpdate(); }catch(e){}
+        return r;
+      };
+      T.__cardDashboardWrapped__ = true;
+      return true;
+    }catch(e){
+      return false;
+    }
+  }
+
+  function init(){
+    // 初始刷新一次（避免“登录/下载前空白”）
+    safeUpdate();
+
+    // 每次算分后强制刷新卡片看板
+    if (!wrapCalculate()){
+      const timer = setInterval(function(){
+        if (wrapCalculate()) clearInterval(timer);
+      }, 400);
+      setTimeout(function(){ clearInterval(timer); }, 15000);
     }
 
-    waitForFutureRadar(() => {
-        const FR = window.FutureRadar;
+    // 输入/选择变化时刷新（捕获阶段，不影响原监听器）
+    document.addEventListener('input', function(e){
+      const t = e && e.target;
+      if (t && t.id && t.id.startsWith('github-')) return;
+      safeUpdate();
+    }, true);
 
-        // ---------- 1. 重写 renderSection：无视折叠状态，强制填充内容 ----------
-        const originalRenderSection = FR.renderSection;
-        FR.renderSection = function(key) {
-            try {
-                const listContainer = document.getElementById(`list-${key}`);
-                const doneContainer = document.getElementById(`list-${key}-done`);
-                if (!listContainer) return;
+    document.addEventListener('change', function(e){
+      const t = e && e.target;
+      if (t && t.id && t.id.startsWith('github-')) return;
+      safeUpdate();
+    }, true);
+  }
 
-                const items = this.data[key] || [];
-                const pending = items.filter(i => !i.completed);
-                const done = items.filter(i => i.completed);
-
-                // 排序（与原逻辑一致）
-                const sortMode = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'priority';
-                pending.sort((a, b) => {
-                    const aInProgress = !!(a.dateEnd && new Date(a.date) <= new Date() && new Date(a.dateEnd) >= new Date());
-                    const bInProgress = !!(b.dateEnd && new Date(b.date) <= new Date() && new Date(b.dateEnd) >= new Date());
-                    if (aInProgress !== bInProgress) return aInProgress ? -1 : 1;
-
-                    const ap = this.normalizePriority(a.priority != null ? a.priority : (a.isImportant ? 3 : 1));
-                    const bp = this.normalizePriority(b.priority != null ? b.priority : (b.isImportant ? 3 : 1));
-                    if (sortMode === 'time') {
-                        const at = this.getEventSortTime(a);
-                        const bt = this.getEventSortTime(b);
-                        if (at !== bt) return at - bt;
-                        if (ap !== bp) return bp - ap;
-                        if (!!a.isImportant !== !!b.isImportant) return a.isImportant ? -1 : 1;
-                        return 0;
-                    }
-                    if (ap !== bp) return bp - ap;
-                    if (!!a.isImportant !== !!b.isImportant) return a.isImportant ? -1 : 1;
-                    return this.daysLeft(a.date, a.dateEnd) - this.daysLeft(b.date, b.dateEnd);
-                });
-
-                // ----- 强制清空并重新渲染待办区 -----
-                listContainer.innerHTML = '';
-                if (pending.length === 0) {
-                    listContainer.innerHTML = `<div style="text-align:center; padding:30px 10px; color:#adb5bd;">
-                        <div style="font-size:40px; margin-bottom:10px;">🏝️</div>
-                        <div>当前无待办事件</div>
-                        <div style="font-size:12px; margin-top:5px;">享受这段清空的时光吧！</div>
-                    </div>`;
-                } else {
-                    pending.forEach(item => {
-                        const html = this.createCardHtml(key, item);
-                        if (html && html.trim()) listContainer.innerHTML += html;
-                    });
-                }
-
-                // ----- 已完成区（保留折叠功能）-----
-                if (doneContainer) {
-                    doneContainer.innerHTML = '';
-                    if (done.length > 0) {
-                        doneContainer.innerHTML = `<div style="padding:10px; font-weight:600; color:#6b7280; font-size:12px; cursor:pointer; border-top:1px dashed #e5e7eb; margin-top:5px;" onclick="this.parentElement.classList.toggle('collapsed')">✅ 已完成 (${done.length}) <span style="font-size:10px; opacity:0.7;">(点击展开/折叠)</span> ▼</div>`;
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', init, { once:true });
+  } else {
+    init();
+  }
+})();
+</script>
+his.parentElement.classList.toggle('collapsed')">✅ 已完成 (${done.length}) <span style="font-size:10px; opacity:0.7;">(点击展开/折叠)</span> ▼</div>`;
                         done.forEach(item => doneContainer.innerHTML += this.createCardHtml(key, item));
                     }
                 }
