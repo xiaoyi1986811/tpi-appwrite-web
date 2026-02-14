@@ -29803,6 +29803,10 @@ window.__tpi_syncDateToMain = function(){
   }
   }
 
+  // Alias for backward compatibility (single underscore)
+  window._tpi_unpackCloudPayload = __tpi_unpackCloudPayload;
+
+
   window.tpiSaveToday = async function () {
     try{
     console.log('📤 ═════════════════════════════════════════════════════');
