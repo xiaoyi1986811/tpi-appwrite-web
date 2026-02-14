@@ -5112,24 +5112,22 @@ window.exportAsCSV = function() {
   </div>
 
   <!-- 登录区 -->
-  <div id="tpi-auth-panel" style="max-width: 820px;">
-    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
-      <div class="form-group" style="min-width:260px; flex:1;">
-        <label for="tpi-username" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">邮箱:</label>
-        <input id="tpi-username" type="text" placeholder="请输入邮箱" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+  <div id="tpi-auth-panel" style="max-width: 100%;">
+    <div style="display:flex; gap:24px; align-items:center;">
+      <div style="display:flex; align-items:center; gap:10px; flex:2;">
+        <label for="tpi-username" style="font-weight:600; color:#374151; white-space:nowrap;">邮箱:</label>
+        <input id="tpi-username" type="text" placeholder="请输入邮箱" style="flex:1; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
       </div>
-      <div class="form-group" style="min-width:260px; flex:1;">
-        <label for="tpi-password" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">密码:</label>
-        <input id="tpi-password" type="password" placeholder="请输入密码" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+      <div style="display:flex; align-items:center; gap:10px; flex:2;">
+        <label for="tpi-password" style="font-weight:600; color:#374151; white-space:nowrap;">密码:</label>
+        <input id="tpi-password" type="password" placeholder="请输入密码" style="flex:1; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
       </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button type="button" onclick="tpiRegister()" style="padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-          🆕 注册新账号
-        </button>
-        <button type="button" onclick="tpiLogin()" style="padding:12px 20px; background: linear-gradient(135deg,#10b981,#059669); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-          ✅ 登录
-        </button>
-      </div>
+      <button type="button" onclick="tpiRegister()" style="flex:1.5; padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; white-space: nowrap;">
+        🆕 注册新账号
+      </button>
+      <button type="button" onclick="tpiLogin()" style="flex:1.2; padding:12px 20px; background: linear-gradient(135deg,#10b981,#059669); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; white-space: nowrap;">
+        ✅ 登录
+      </button>
     </div>
     <div id="tpi-login-msg" style="margin-top:10px; font-size:14px;"></div>
   </div>
