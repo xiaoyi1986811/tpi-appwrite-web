@@ -2868,6 +2868,257 @@ window.exportReportComplete = function(format) {
 
 </head>
                 <body>
+
+<!-- ========== 卡片式分数看板（保留：你截图2的样式；实时与TPI仪表盘同步） ========== -->
+<style id="top-scoreboard-style">
+  .top-scoreboard{
+    position: sticky;
+    top: 0;
+    z-index: 5000;
+    background: linear-gradient(135deg, rgba(224,231,255,.95) 0%, rgba(221,214,254,.95) 100%);
+    border-bottom: 1px solid rgba(148,163,184,.35);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .top-scoreboard-inner{
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .top-scoreboard-inner::-webkit-scrollbar{ height: 6px; }
+  .top-scoreboard-inner::-webkit-scrollbar-thumb{ background: rgba(148,163,184,.45); border-radius: 999px; }
+
+  .ts-item{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-radius: 16px;
+    background: rgba(255,255,255,0.70);
+    border: 1px solid rgba(148,163,184,.25);
+    white-space: nowrap;
+  }
+  .ts-label{ font-size: 14px; opacity: .92; font-weight: 700; }
+  .ts-value{ font-size: 20px; font-weight: 900; letter-spacing: .2px; }
+  .ts-sep{ width: 1px; height: 26px; background: rgba(148,163,184,.35); }
+  .ts-total{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    border-radius: 16px;
+    background: rgba(37,99,235,.12);
+    border: 1px solid rgba(37,99,235,.20);
+    white-space: nowrap;
+  }
+  .ts-total-label{ font-size: 14px; opacity: .92; font-weight: 800; }
+  .ts-total-value{ font-size: 22px; font-weight: 950; }
+  .ts-rating{
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 16px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 900;
+    border: 1px solid rgba(148,163,184,.25);
+    background: rgba(255,255,255,0.72);
+    white-space: nowrap;
+  }
+  .ts-rating.is-excellent{ background: rgba(16,185,129,.18); border-color: rgba(16,185,129,.25); }
+  .ts-rating.is-steady{ background: rgba(59,130,246,.18); border-color: rgba(59,130,246,.25); }
+  .ts-rating.is-baseline{ background: rgba(245,158,11,.20); border-color: rgba(245,158,11,.25); }
+  .ts-rating.is-maintenance{ background: rgba(107,114,128,.18); border-color: rgba(107,114,128,.25); }
+  .ts-rating.is-overload{ background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.25); }
+
+  @media (max-width: 640px){
+    .top-scoreboard-inner{ padding: 8px 10px; }
+    .ts-item, .ts-total, .ts-rating{ padding: 8px 12px; border-radius: 14px; }
+    .ts-label, .ts-total-label{ font-size: 12px; }
+    .ts-value{ font-size: 18px; }
+    .ts-total-value{ font-size: 20px; }
+    .ts-sep{ height: 22px; }
+  }
+</style>
+
+<div aria-label="卡片式分数看板" class="top-scoreboard" id="top-scoreboard">
+  <div class="top-scoreboard-inner">
+    <div class="ts-item"><span class="ts-label">📉 MA7</span><span class="ts-value" id="ts-ma7">0.0</span></div>
+    <div aria-hidden="true" class="ts-sep"></div>
+    <div class="ts-item"><span class="ts-label">📝 AMI</span><span class="ts-value" id="ts-ami">0.0</span></div>
+    <div aria-hidden="true" class="ts-sep"></div>
+    <div class="ts-item"><span class="ts-label">🧠 FLI</span><span class="ts-value" id="ts-fli">0.0</span></div>
+    <div aria-hidden="true" class="ts-sep"></div>
+    <div class="ts-item"><span class="ts-label">🧱 SYS</span><span class="ts-value" id="ts-sys">0.0</span></div>
+    <div aria-hidden="true" class="ts-sep"></div>
+    <div class="ts-item"><span class="ts-label">🎁 BONUS</span><span class="ts-value" id="ts-bonus">0.0</span></div>
+    <div aria-hidden="true" class="ts-sep"></div>
+    <div class="ts-total"><span class="ts-total-label">总分</span><span class="ts-total-value" id="ts-total">0.0</span></div>
+    <div class="ts-rating" id="ts-rating" title="评级">—</div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   卡片式分数看板（ts-xxx）实时同步补丁
+   - 不依赖 TopScoreboard（已移除）
+   - 每次算分/恢复/下载/输入变化后都刷新
+   - 同时触发旧 ScoreDashboard.update（如存在）与 TPI 仪表盘刷新（如存在入口）
+========================================================= */
+(function(){
+  'use strict';
+
+  function num(v){
+    const n = parseFloat(String(v ?? '').trim());
+    return isNaN(n) ? 0 : n;
+  }
+  function readScore(id){
+    const el = document.getElementById(id);
+    if (!el) return 0;
+    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return num(el.value);
+    return num(el.textContent);
+  }
+  function setText(id, v){
+    const el = document.getElementById(id);
+    if (!el) return;
+    const s = (typeof v === 'number') ? (Math.round(v*10)/10).toFixed(1) : String(v ?? '');
+    if (el.textContent !== s) el.textContent = s;
+  }
+
+  function getRatingText(){
+    const sel = document.getElementById('tpi-rating');
+    if (!sel) return '';
+    try{
+      if (sel.tagName === 'SELECT'){
+        const opt = sel.options && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+        return (opt && opt.textContent) ? opt.textContent.trim() : String(sel.value || '').trim();
+      }
+      return String(sel.value || '').trim();
+    }catch(e){
+      return String(sel.value || '').trim();
+    }
+  }
+
+  function setRatingPill(text, total){
+    const el = document.getElementById('ts-rating');
+    if (!el) return;
+    const t = String(text || '').trim();
+    let label = t;
+    if (!label){
+      const x = num(total);
+      if (x >= 201) label = '⚠️ 过载 (Overload)';
+      else if (x >= 156) label = '🏆 卓越 (Excellence)';
+      else if (x >= 121) label = '📈 推进 (Steady)';
+      else if (x >= 95) label = '✅ 维持 (Baseline)';
+      else label = '🔧 维护 (Maintenance)';
+    }
+    el.textContent = label;
+
+    el.classList.remove('is-overload','is-excellent','is-steady','is-baseline','is-maintenance');
+    const s = label.toLowerCase();
+    if (s.includes('overload') || label.includes('过载')) el.classList.add('is-overload');
+    else if (s.includes('excellence') || label.includes('卓越')) el.classList.add('is-excellent');
+    else if (s.includes('steady') || label.includes('推进')) el.classList.add('is-steady');
+    else if (s.includes('baseline') || label.includes('维持')) el.classList.add('is-baseline');
+    else el.classList.add('is-maintenance');
+  }
+
+  function update(){
+    const ma7 = readScore('ma7-score');
+    const ami = readScore('ami-score');
+    const fli = readScore('fli-score');
+    const sys = readScore('sys-score');
+    const bonus = readScore('bonus-score');
+
+    const totalEl = document.getElementById('tpi-total');
+    let totalRaw = '';
+    if (totalEl){
+      totalRaw = (totalEl.tagName === 'INPUT' || totalEl.tagName === 'TEXTAREA' || totalEl.tagName === 'SELECT')
+        ? String(totalEl.value ?? '')
+        : String(totalEl.textContent ?? '');
+      totalRaw = totalRaw.trim();
+    }
+    const sum = ma7 + ami + fli + sys + bonus;
+
+    const totalNum = num(totalRaw);
+    const hasNumeric = totalRaw !== '' && !isNaN(parseFloat(totalRaw)) && isFinite(totalNum);
+
+    let total = null;
+    if (totalEl && totalRaw && !hasNumeric) total = null;
+    else if (totalEl && (totalRaw === '' || !hasNumeric)) total = sum;
+    else total = totalNum;
+
+    setText('ts-ma7', ma7);
+    setText('ts-ami', ami);
+    setText('ts-fli', fli);
+    setText('ts-sys', sys);
+    setText('ts-bonus', bonus);
+
+    if (total === null){
+      const el = document.getElementById('ts-total');
+      if (el) el.textContent = totalRaw || '—';
+    } else {
+      setText('ts-total', total);
+    }
+
+    setRatingPill(getRatingText(), (total === null ? 0 : total));
+
+    // 兼容：若旧 ScoreDashboard 仍存在（其它页面区域/导出/报告），保持它同步
+    try{
+      if (window.ScoreDashboard && typeof window.ScoreDashboard.update === 'function'){
+        window.ScoreDashboard.update();
+      }
+    }catch(e){}
+
+    // TPI 仪表盘：若存在显式更新入口，触发一次（不强依赖）
+    try{
+      if (window.TPI && typeof window.TPI.updateStatistics === 'function') window.TPI.updateStatistics();
+    }catch(e){}
+  }
+
+  function hook(){
+    // 1) DOM 就绪后先刷一次（避免“登录后0.0”停留）
+    if (document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', ()=>setTimeout(update, 0), {once:true});
+    } else {
+      setTimeout(update, 0);
+    }
+
+    // 2) 全局输入/变化监听（捕获阶段，不干扰原逻辑）
+    document.addEventListener('input', ()=>update(), true);
+    document.addEventListener('change', ()=>update(), true);
+
+    // 3) 包装 calculateTPI：每次业务算分后都刷
+    try{
+      if (window.TPI && typeof window.TPI.calculateTPI === 'function' && !window.TPI.__card_scoreboard_wrapped){
+        const orig = window.TPI.calculateTPI;
+        window.TPI.calculateTPI = function(){
+          const r = orig.apply(this, arguments);
+          try{ update(); }catch(e){}
+          return r;
+        };
+        window.TPI.__card_scoreboard_wrapped = true;
+      }
+    }catch(e){}
+
+    // 4) 兜底轮询（防止极端情况下漏掉事件）
+    setInterval(()=>{ try{ update(); }catch(e){} }, 1500);
+  }
+
+  hook();
+  window.CardScoreboard = { update };
+})();
+</script>
+<!-- ========== /卡片式分数看板 ========== -->
+
+
                     ${reportContent.innerHTML}
                 
 
