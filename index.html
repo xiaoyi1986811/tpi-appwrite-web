@@ -5101,7 +5101,7 @@ window.exportAsCSV = function() {
 
       <div style="font-weight:700; color:#111827;">👤 已登录: <span id="tpi-current-user"></span></div>
       <button type="button" onclick="tpiSaveToday()" style="padding:12px 20px; background: linear-gradient(135deg,#3b82f6,#2563eb); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-        ⬆️ 同步所选日期到云端
+        ⬆️ 同步上传所选日期到云端
       </button>
       <button type="button" onclick="tpiLoadToday()" style="padding:12px 20px; background: linear-gradient(135deg,#06b6d4,#0891b2); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
         ⬇️ 从云端下载所选日期数据
@@ -29395,8 +29395,14 @@ try{
   // ⚠️ TODO: 请替换为你的 Appwrite 配置
   const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
   const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
-  const APPWRITE_DATABASE_ID = 'tpi_database'; // 数据库 ID
+  const APPWRITE_DATABASE_ID = '698dad1c0013e7c982fe'; // 数据库 ID
   const APPWRITE_COLLECTION_ID = 'daily_records'; // 集合 ID (需要在Appwrite控制台创建)
+
+  // 兼容别名：确保不同模块都能拿到 DB/Collection 配置
+  window.APPWRITE_DATABASE_ID = APPWRITE_DATABASE_ID;
+  window.APPWRITE_COLLECTION_ID = APPWRITE_COLLECTION_ID;
+  window.DATABASE_ID = APPWRITE_DATABASE_ID;
+  window.COLLECTION_ID = APPWRITE_COLLECTION_ID;
 
   // 初始化 Appwrite 客户端
   var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
@@ -29622,9 +29628,9 @@ window.__tpi_syncDateToMain = function(){
       try{ const pw = document.getElementById('tpi-password'); if (pw) pw.value = ''; }catch(e){}
       setLoggedInUI(username);
 
-      // 登录后自动加载今日
-      setTimeout(()=>{ try{ window.tpiLoadToday(); }catch(e){} }, 50);
-    }catch(err){
+      // 登录后不再自动从云端下载/加载（避免误触发与“下载失败”弹窗）
+      // 如需下载，请手动点击“从云端下载所选日期”
+      }catch(err){
       console.error('❌ 登录失败:', err);
       let errorMsg = '登录失败';
       if (err.message) {
@@ -29693,6 +29699,13 @@ window.__tpi_syncDateToMain = function(){
     console.log('📤 ═════════════════════════════════════════════════════');
     console.log('📤 [云同步] 开始上传数据...');
     const __upload_start_time = Date.now();
+
+      // 兼容：某些构建/脚本作用域下 DATABASE_ID 可能不可见，这里统一从 window/常量中取值
+      const __DB_ID = (typeof DATABASE_ID !== 'undefined' ? DATABASE_ID : (window.DATABASE_ID || window.APPWRITE_DATABASE_ID));
+      const __COL_ID = (typeof COLLECTION_ID !== 'undefined' ? COLLECTION_ID : (window.COLLECTION_ID || window.APPWRITE_COLLECTION_ID));
+      if(!__DB_ID || !__COL_ID){
+        throw new Error('DATABASE_ID/COLLECTION_ID 未配置：请检查 Appwrite 配置区');
+      }
       const dateStr = __tpi_getSyncDate();
       console.log(`📅 [上传] 同步日期: ${dateStr || '未选择'}`);
       if(!dateStr){
@@ -29730,12 +29743,12 @@ window.__tpi_syncDateToMain = function(){
       // 先尝试更新，不存在再创建
       console.log('☁️ [上传] 正在写入云端数据库...');
       try{
-        await databases.updateDocument(DATABASE_ID, COLLECTION_ID, docId, docData);
+        await databases.updateDocument(__DB_ID, __COL_ID, docId, docData);
         console.log('✅ [上传] 文档更新成功（覆盖已存在的文档）');
       }catch(e1){
         console.log('ℹ️ [上传] 文档不存在，尝试创建新文档...');
         try{
-          await databases.createDocument(DATABASE_ID, COLLECTION_ID, docId, docData);
+          await databases.createDocument(__DB_ID, __COL_ID, docId, docData);
           console.log('✅ [上传] 文档创建成功（新文档）');
         }catch(e2){
           throw e2;
@@ -29805,7 +29818,7 @@ window.__tpi_syncDateToMain = function(){
       console.log(`🆔 [上传] 用户ID: ${userId}`);
       console.log(`📝 [上传] 文档ID: ${docId}`);
 
-      const doc = await databases.getDocument(DATABASE_ID, COLLECTION_ID, docId);
+      const doc = await databases.getDocument(__DB_ID, __COL_ID, docId);
 
       // 解析云端 data
       let payload = {};
@@ -29968,6 +29981,12 @@ var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new 
 // 数据库和集合 ID (需与你在 Appwrite 控制台创建的一致)
 const DATABASE_ID = '698dad1c0013e7c982fe';
 const COLLECTION_ID = 'daily_records';
+
+// 绑定到 window，供其它脚本/闭包稳定访问
+window.DATABASE_ID = DATABASE_ID;
+window.COLLECTION_ID = COLLECTION_ID;
+window.APPWRITE_DATABASE_ID = DATABASE_ID;
+window.APPWRITE_COLLECTION_ID = COLLECTION_ID;
 
 
 /* ===========================
