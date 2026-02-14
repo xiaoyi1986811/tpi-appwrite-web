@@ -2667,6 +2667,24 @@ window.closeAllModals = function() {
     }
 };
 
+// 0.05 云端同步核心函数占位符（防止按钮onclick时未定义）
+window.tpiLogin = window.tpiLogin || function() {
+    console.warn('⚠️ tpiLogin 尚未完全初始化，请稍候');
+};
+window.tpiLogout = window.tpiLogout || function() {
+    console.warn('⚠️ tpiLogout 尚未完全初始化，请稍候');
+};
+window.tpiSaveToday = window.tpiSaveToday || function() {
+    console.warn('⚠️ tpiSaveToday 尚未完全初始化，请稍候');
+};
+window.tpiLoadToday = window.tpiLoadToday || function() {
+    console.warn('⚠️ tpiLoadToday 尚未完全初始化，请稍候');
+};
+window.tpiRegister = window.tpiRegister || function() {
+    console.warn('⚠️ tpiRegister 尚未完全初始化，请稍候');
+};
+console.log('✅ [早期初始化] 云端同步函数占位符已创建');
+
 // 0.1 前往云端同步设置
 window.goToCloudSync = function() {
     console.log('🔄 [goToCloudSync] 前往云端同步设置');
@@ -27535,6 +27553,7 @@ console.log('');
           return;
         }
         const fn = m[1];
+        // ✅ 修复：不要覆盖已经存在的函数（包括占位符函数）
         if(typeof window[fn] !== 'function'){
           window[fn] = function(){
             tpiToast(`⚠️ 按钮功能未绑定：${fn}（已兜底避免报错）`);
@@ -29394,7 +29413,24 @@ try{
   window.COLLECTION_ID = APPWRITE_COLLECTION_ID;
 
   // 初始化 Appwrite 客户端
-  var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
+  if (!window.__appwriteClient) {
+    window.__appwriteClient = new Appwrite.Client();
+    window.__appwriteClient.setEndpoint(APPWRITE_ENDPOINT).setProject(APPWRITE_PROJECT_ID);
+    console.log('✅ [Appwrite] 客户端已初始化:', APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID);
+  }
+  var client = window.__appwriteClient;
+
+  if (!window.__appwriteAccount) {
+    window.__appwriteAccount = new Appwrite.Account(client);
+    console.log('✅ [Appwrite] Account服务已初始化');
+  }
+  var account = window.account = window.__appwriteAccount;
+
+  if (!window.__appwriteDatabases) {
+    window.__appwriteDatabases = new Appwrite.Databases(client);
+    console.log('✅ [Appwrite] Databases服务已初始化');
+  }
+  var databases = window.databases = window.__appwriteDatabases;
     client.setEndpoint(APPWRITE_ENDPOINT)
     .setProject(APPWRITE_PROJECT_ID);
 
@@ -30071,16 +30107,12 @@ window.__tpi_syncDateToMain = function(){
       setLoggedOutUI();
     }
   });
-})();
-</script>
 
+/* ========================================================================
+   以下Appwrite补丁脚本已注释（避免重复初始化和冲突）
+   主要的云端同步功能已在前面的主脚本块中实现
+========================================================================
 
-<!-- =========================================================
-     Appwrite Prompt Patch (Strict-Flow Implementation)
-     - Adds "auth-section/main-section/login-form/register-form" compatibility
-     - Implements the exact 5-step flow from the user's prompt
-========================================================= -->
-<script>
 /* ===========================
    第二步：替换/补充配置区（在 <script> 开头）
    （此补丁在页面末尾执行，但提供同等可执行配置区与初始化逻辑）
@@ -30418,7 +30450,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     await account.get(); // 尝试获取当前用户
     showMainInterface();
-  } catch {
+  } catch (e) {
     showAuthInterface();
   }
 });
@@ -30443,6 +30475,9 @@ function showMainInterface() { /* 切换显示主界面 */ }
 function showAuthInterface() { /* 切换显示登录界面 */ }
 
 // ========== Appwrite 集成区结束 ==========
+
+======================================================================== */
+// 以上重复脚本已注释，使用主脚本块中的初始化即可
 
 <script>
 
