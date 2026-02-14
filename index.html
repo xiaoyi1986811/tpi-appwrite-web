@@ -2668,21 +2668,32 @@ window.closeAllModals = function() {
 };
 
 // 0.05 云端同步核心函数占位符（防止按钮onclick时未定义）
-window.tpiLogin = window.tpiLogin || function() {
-    console.warn('⚠️ tpiLogin 尚未完全初始化，请稍候');
-};
-window.tpiLogout = window.tpiLogout || function() {
-    console.warn('⚠️ tpiLogout 尚未完全初始化，请稍候');
-};
-window.tpiSaveToday = window.tpiSaveToday || function() {
-    console.warn('⚠️ tpiSaveToday 尚未完全初始化，请稍候');
-};
-window.tpiLoadToday = window.tpiLoadToday || function() {
-    console.warn('⚠️ tpiLoadToday 尚未完全初始化，请稍候');
-};
-window.tpiRegister = window.tpiRegister || function() {
-    console.warn('⚠️ tpiRegister 尚未完全初始化，请稍候');
-};
+// 注意：使用 ||= 运算符，如果函数未定义才创建占位符，真正的函数定义时会覆盖
+if (typeof window.tpiLogin === 'undefined') {
+    window.tpiLogin = function() {
+        console.warn('⚠️ tpiLogin 尚未完全初始化，请稍候');
+    };
+}
+if (typeof window.tpiLogout === 'undefined') {
+    window.tpiLogout = function() {
+        console.warn('⚠️ tpiLogout 尚未完全初始化，请稍候');
+    };
+}
+if (typeof window.tpiSaveToday === 'undefined') {
+    window.tpiSaveToday = function() {
+        console.warn('⚠️ tpiSaveToday 尚未完全初始化，请稍候');
+    };
+}
+if (typeof window.tpiLoadToday === 'undefined') {
+    window.tpiLoadToday = function() {
+        console.warn('⚠️ tpiLoadToday 尚未完全初始化，请稍候');
+    };
+}
+if (typeof window.tpiRegister === 'undefined') {
+    window.tpiRegister = function() {
+        console.warn('⚠️ tpiRegister 尚未完全初始化，请稍候');
+    };
+}
 console.log('✅ [早期初始化] 云端同步函数占位符已创建');
 
 // 0.1 前往云端同步设置
@@ -29431,11 +29442,6 @@ try{
     console.log('✅ [Appwrite] Databases服务已初始化');
   }
   var databases = window.databases = window.__appwriteDatabases;
-    client.setEndpoint(APPWRITE_ENDPOINT)
-    .setProject(APPWRITE_PROJECT_ID);
-
-var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
-var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
   // --------- storage helpers (use existing safe wrappers if present) ----------
   const lsGet = (k, d) => (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
@@ -30107,6 +30113,9 @@ window.__tpi_syncDateToMain = function(){
       setLoggedOutUI();
     }
   });
+})(); // 立即执行函数结束
+
+</script>
 
 /* ========================================================================
    以下Appwrite补丁脚本已注释（避免重复初始化和冲突）
