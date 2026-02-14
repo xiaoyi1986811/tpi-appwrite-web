@@ -2667,35 +2667,6 @@ window.closeAllModals = function() {
     }
 };
 
-// 0.05 云端同步核心函数占位符（防止按钮onclick时未定义）
-// 注意：使用 ||= 运算符，如果函数未定义才创建占位符，真正的函数定义时会覆盖
-if (typeof window.tpiLogin === 'undefined') {
-    window.tpiLogin = function() {
-        console.warn('⚠️ tpiLogin 尚未完全初始化，请稍候');
-    };
-}
-if (typeof window.tpiLogout === 'undefined') {
-    window.tpiLogout = function() {
-        console.warn('⚠️ tpiLogout 尚未完全初始化，请稍候');
-    };
-}
-if (typeof window.tpiSaveToday === 'undefined') {
-    window.tpiSaveToday = function() {
-        console.warn('⚠️ tpiSaveToday 尚未完全初始化，请稍候');
-    };
-}
-if (typeof window.tpiLoadToday === 'undefined') {
-    window.tpiLoadToday = function() {
-        console.warn('⚠️ tpiLoadToday 尚未完全初始化，请稍候');
-    };
-}
-if (typeof window.tpiRegister === 'undefined') {
-    window.tpiRegister = function() {
-        console.warn('⚠️ tpiRegister 尚未完全初始化，请稍候');
-    };
-}
-console.log('✅ [早期初始化] 云端同步函数占位符已创建');
-
 // 0.1 前往云端同步设置
 window.goToCloudSync = function() {
     console.log('🔄 [goToCloudSync] 前往云端同步设置');
@@ -2996,14 +2967,25 @@ window.exportReportComplete = function(format) {
 
 // 2. 从云端加载函数 - 现在使用GitHub云端同步
 window.loadFromCloudComplete = function() {
-    console.warn('Legacy入口 loadFromCloudComplete 已弃用，自动转为 Appwrite 下载');
-    try{
-      if (typeof window.tpiLoadToday === 'function') return window.tpiLoadToday();
-      if (typeof window.loadFromCloud === 'function') return window.loadFromCloud();
-      alert('❌ 下载功能未就绪：tpiLoadToday/loadFromCloud 均不可用');
-    }catch(e){
-      console.error('❌ [loadFromCloudComplete->Appwrite] 失败:', e);
-      alert('❌ 下载失败：' + (e?.message || e));
+    console.log('🔵 [loadFromCloudComplete] 从云端加载功能被调用');
+    console.log('🔵 [loadFromCloudComplete] 执行时间:', new Date().toLocaleString());
+    
+    try {
+        // Firebase已移除，现在使用GitHub云端同步
+        console.log('🔍 [loadFromCloudComplete] 使用GitHub云端同步方式');
+        
+        // 检查GitHub加载函数是否可用
+        if (window.loadFromGitHub && typeof window.loadFromGitHub === 'function') {
+            console.log('✅ [loadFromCloudComplete] 调用GitHub加载功能');
+            window.loadFromGitHub();
+        } else {
+            console.warn('⚠️ [loadFromCloudComplete] GitHub加载功能未初始化');
+            alert('⚠️ GitHub云端同步功能初始化中\n\n请稍等片刻后重试\n\n如果持续出现此问题，请刷新页面');
+        }
+    } catch (error) {
+        console.error('❌ [loadFromCloudComplete] 从云端加载失败:', error);
+        console.error('❌ [loadFromCloudComplete] 错误堆栈:', error.stack);
+        alert('❌ 加载失败\n\n错误信息: ' + error.message + '\n\n请查看控制台获取详细信息');
     }
 };
 
@@ -27564,7 +27546,6 @@ console.log('');
           return;
         }
         const fn = m[1];
-        // ✅ 修复：不要覆盖已经存在的函数（包括占位符函数）
         if(typeof window[fn] !== 'function'){
           window[fn] = function(){
             tpiToast(`⚠️ 按钮功能未绑定：${fn}（已兜底避免报错）`);
@@ -29424,24 +29405,12 @@ try{
   window.COLLECTION_ID = APPWRITE_COLLECTION_ID;
 
   // 初始化 Appwrite 客户端
-  if (!window.__appwriteClient) {
-    window.__appwriteClient = new Appwrite.Client();
-    window.__appwriteClient.setEndpoint(APPWRITE_ENDPOINT).setProject(APPWRITE_PROJECT_ID);
-    console.log('✅ [Appwrite] 客户端已初始化:', APPWRITE_ENDPOINT, APPWRITE_PROJECT_ID);
-  }
-  var client = window.__appwriteClient;
+  var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
+    client.setEndpoint(APPWRITE_ENDPOINT)
+    .setProject(APPWRITE_PROJECT_ID);
 
-  if (!window.__appwriteAccount) {
-    window.__appwriteAccount = new Appwrite.Account(client);
-    console.log('✅ [Appwrite] Account服务已初始化');
-  }
-  var account = window.account = window.__appwriteAccount;
-
-  if (!window.__appwriteDatabases) {
-    window.__appwriteDatabases = new Appwrite.Databases(client);
-    console.log('✅ [Appwrite] Databases服务已初始化');
-  }
-  var databases = window.databases = window.__appwriteDatabases;
+var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
+var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
   // --------- storage helpers (use existing safe wrappers if present) ----------
   const lsGet = (k, d) => (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
@@ -29725,120 +29694,6 @@ window.__tpi_syncDateToMain = function(){
     return `${safeUser}_${safeDate}`;
   }
 
-  // ---------- 2.1) 额外：全页面表单快照（用于补足 collectFormData 未覆盖的字段） ----------
-  function __tpi_collectDomSnapshot(){
-    const snap = { v: 1, at: Date.now(), items: {} };
-    const nodes = document.querySelectorAll('input, select, textarea');
-    nodes.forEach(el=>{
-      try{
-        const tag = (el.tagName||'').toLowerCase();
-        const type = (el.getAttribute('type')||'').toLowerCase();
-        const id = el.id ? `id:${el.id}` : '';
-        const name = (!id && el.name) ? `name:${el.name}` : '';
-        const key = id || name;
-        if(!key) return;
-
-        // 跳过密码框，避免把密码同步到云端
-        if(tag==='input' && type==='password') return;
-
-        let val;
-        if(tag==='input' && (type==='checkbox' || type==='radio')){
-          val = { t: type, c: !!el.checked, v: el.value ?? '' };
-        }else{
-          val = { t: tag, v: el.value ?? '' };
-        }
-        snap.items[key] = val;
-      }catch(e){}
-    });
-    return snap;
-  }
-
-  function __tpi_applyDomSnapshot(snap){
-    if(!snap || !snap.items) return;
-    const items = snap.items;
-    Object.keys(items).forEach(k=>{
-      const it = items[k];
-      let el = null;
-      try{
-        if(k.startsWith('id:')){
-          el = document.getElementById(k.slice(3));
-        }else if(k.startsWith('name:')){
-          const name = k.slice(5);
-          // radio 可能多个，优先匹配 value
-          if(it && it.t==='radio'){
-            const radios = document.querySelectorAll(`input[type="radio"][name="${CSS.escape(name)}"]`);
-            radios.forEach(r=>{
-              if(String(r.value??'') === String(it.v??'')) r.checked = !!it.c;
-            });
-            return;
-          }
-          el = document.querySelector(`[name="${CSS.escape(name)}"]`);
-        }
-        if(!el) return;
-
-        const tag = (el.tagName||'').toLowerCase();
-        const type = (el.getAttribute('type')||'').toLowerCase();
-
-        if(tag==='input' && type==='checkbox'){
-          el.checked = !!it.c;
-        }else if(tag==='input' && type==='radio'){
-          el.checked = !!it.c;
-        }else{
-          el.value = (it.v ?? '');
-        }
-        // 尽量触发依赖逻辑（实时计分/联动 UI）
-        try{ el.dispatchEvent(new Event('input', {bubbles:true})); }catch(e){}
-        try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch(e){}
-      }catch(e){}
-    });
-  }
-
-  // payload schema:
-  // - 旧版：{ [lsKey]: lsValue, ... }
-  // - 新版：{ __schema:'tpi_cloud_v2', __ls:{...}, __dom:{...}, __meta:{...} }
-  function __tpi_packCloudPayload(){
-    // 1) localStorage 全量
-    const ls = {};
-    const n = __tpi_ls_length(0);
-    for(let i=0;i<n;i++){
-      const k = __tpi_ls_key(i);
-      if(!k) continue;
-      ls[k] = __tpi_ls_get(k);
-    }
-
-    // 2) DOM 快照（补足本地结构化数据可能漏字段）
-    const dom = __tpi_collectDomSnapshot();
-
-    return {
-      __schema: 'tpi_cloud_v2',
-      __meta: {
-        at: Date.now(),
-        ua: navigator.userAgent || '',
-        href: location.href || ''
-      },
-      __dom: dom,
-      __ls: ls
-    };
-  }
-
-  function __tpi_unpackCloudPayload(raw){
-    // raw 可以是对象或 JSON 字符串
-    let obj = raw;
-    if(typeof raw === 'string'){
-      obj = JSON.parse(raw || '{}');
-    }
-    if(obj && obj.__schema === 'tpi_cloud_v2' && obj.__ls){
-      return { ls: obj.__ls || {}, dom: obj.__dom || null, meta: obj.__meta || {} };
-    }
-    // 旧版兼容：把对象本身当作 ls map
-    return { ls: (obj && typeof obj === 'object') ? obj : {}, dom: null, meta: {} };
-  }
-  }
-
-  // Alias for backward compatibility (single underscore)
-  window._tpi_unpackCloudPayload = __tpi_unpackCloudPayload;
-
-
   window.tpiSaveToday = async function () {
     try{
     console.log('📤 ═════════════════════════════════════════════════════');
@@ -29865,11 +29720,14 @@ window.__tpi_syncDateToMain = function(){
         try{ saveToLocalStorage(); }catch(e){ console.warn('[云同步] saveToLocalStorage 调用失败(忽略):', e); }
       }
 
-      // 2) 打包上传数据（云端必须“完整可还原”）：localStorage 全量 + DOM 快照（补足结构化数据可能漏字段）
-      console.log('📦 [上传] 正在打包数据(localStorage + DOM快照)...');
-      const payloadObj = __tpi_packCloudPayload();
-      const payload = payloadObj.__ls || {};
-      const dataStr = JSON.stringify(payloadObj);
+      // 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
+      console.log('📦 [上传] 正在打包 localStorage 数据...');
+      const payload = {};
+      for(let i=0;i<localStorage.length;i++){
+        const k = localStorage.key(i);
+        payload[k] = localStorage.getItem(k);
+      }
+      const dataStr = JSON.stringify(payload);
       console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`);
 
       // 3) 写入 Appwrite（字段必须匹配：data(longtext string) + userId + date）
@@ -29968,23 +29826,19 @@ window.__tpi_syncDateToMain = function(){
 
       const doc = await databases.getDocument(__DB_ID, __COL_ID, docId);
 
-      // 解析云端 data（兼容旧版/新版 schema）
+      // 解析云端 data
       let payload = {};
-      let domSnap = null;
       console.log(`📦 [下载] 文档数据大小: ${doc.data ? doc.data.length : 0} 字节`);
       try{
-        const unpack = __tpi_unpackCloudPayload(doc.data || '{}');
-        payload = unpack.ls || {};
-        domSnap = unpack.dom || null;
-        console.log('✅ [下载] JSON解析成功');
-        console.log(`📊 [下载] localStorage 字段数: ${Object.keys(payload).length}`);
-        console.log(`🧩 [下载] DOM快照字段数: ${domSnap && domSnap.items ? Object.keys(domSnap.items).length : 0}`);
+        payload = JSON.parse(doc.data || '{}');
+        console.log(`✅ [下载] JSON解析成功`);
+        console.log(`📊 [下载] 数据结构分析: ${Object.keys(payload).length} 个字段`);
       }catch(e){
         console.error('❌ [下载] JSON解析失败:', e);
         throw new Error('云端数据解析失败（data 不是有效 JSON 字符串）');
       }
 
-// 先清空再恢复，避免“残留旧值”导致差异
+      // 先清空再恢复，避免“残留旧值”导致差异
       const beforeKeys = __tpi_ls_length(0);
       __tpi_ls_clear();
       for(const [k,v] of Object.entries(payload)){
@@ -29992,23 +29846,12 @@ window.__tpi_syncDateToMain = function(){
       }
       console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
-      // 可选：如果云端包含 DOM 快照，先直接恢复到页面控件（补足结构化恢复遗漏）
-      if(domSnap && domSnap.items){
-        try{ __tpi_applyDomSnapshot(domSnap); console.log(`✅ [下载] DOM快照已应用 (${Object.keys(domSnap.items).length} 项)`); }catch(e){ console.warn('[云同步] DOM快照应用失败(忽略):', e); }
-      }
-
       // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
       if(typeof loadFromLocalStorage === 'function'){
         try{ 
           loadFromLocalStorage(); 
           console.log('✅ [下载] UI恢复完成 (loadFromLocalStorage)');
-          // 再额外强制触发一次全量重算/刷新（防止某些模块仅在交互时更新）
-          try{ if(typeof calculateAllScores === 'function'){ calculateAllScores(); console.log('🔄 [下载] 已强制重算 calculateAllScores()'); } }catch(e){}
-          try{ if(typeof updateAllDisplays === 'function'){ updateAllDisplays(); console.log('🔄 [下载] 已调用 updateAllDisplays()'); } }catch(e){}
-          try{ if(typeof updateScoreboard === 'function'){ updateScoreboard(); } }catch(e){}
-          try{ if(typeof updateTPIDashboard === 'function'){ updateTPIDashboard(); } }catch(e){}
-
         }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
       }else{
         // 兜底：刷新页面（保证 UI 和 localStorage 一致）
@@ -30113,15 +29956,16 @@ window.__tpi_syncDateToMain = function(){
       setLoggedOutUI();
     }
   });
-})(); // 立即执行函数结束
-
+})();
 </script>
 
-/* ========================================================================
-   以下Appwrite补丁脚本已注释（避免重复初始化和冲突）
-   主要的云端同步功能已在前面的主脚本块中实现
-========================================================================
 
+<!-- =========================================================
+     Appwrite Prompt Patch (Strict-Flow Implementation)
+     - Adds "auth-section/main-section/login-form/register-form" compatibility
+     - Implements the exact 5-step flow from the user's prompt
+========================================================= -->
+<script>
 /* ===========================
    第二步：替换/补充配置区（在 <script> 开头）
    （此补丁在页面末尾执行，但提供同等可执行配置区与初始化逻辑）
@@ -30459,7 +30303,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     await account.get(); // 尝试获取当前用户
     showMainInterface();
-  } catch (e) {
+  } catch {
     showAuthInterface();
   }
 });
@@ -30484,9 +30328,6 @@ function showMainInterface() { /* 切换显示主界面 */ }
 function showAuthInterface() { /* 切换显示登录界面 */ }
 
 // ========== Appwrite 集成区结束 ==========
-
-======================================================================== */
-// 以上重复脚本已注释，使用主脚本块中的初始化即可
 
 <script>
 
