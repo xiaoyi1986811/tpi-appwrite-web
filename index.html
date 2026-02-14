@@ -2965,29 +2965,29 @@ window.exportReportComplete = function(format) {
     }
 };
 
-// 2. 从云端加载函数 - 统一转发到 Appwrite 同步下载（保留旧函数名，避免旧按钮/旧模块失效）
+// 2. 从云端加载函数 - 现在使用GitHub云端同步
 window.loadFromCloudComplete = function() {
     console.log('🔵 [loadFromCloudComplete] 从云端加载功能被调用');
     console.log('🔵 [loadFromCloudComplete] 执行时间:', new Date().toLocaleString());
+    
     try {
-        // 优先：Appwrite 同步下载（你页面的主入口）
-        if (typeof window.tpiLoadToday === 'function') {
-            console.log('✅ [loadFromCloudComplete] 转发到 tpiLoadToday()');
-            return window.tpiLoadToday();
-        }
-        // 兜底：若仍存在旧 GitHub 入口，则允许使用（但不作为主路径）
+        // Firebase已移除，现在使用GitHub云端同步
+        console.log('🔍 [loadFromCloudComplete] 使用GitHub云端同步方式');
+        
+        // 检查GitHub加载函数是否可用
         if (window.loadFromGitHub && typeof window.loadFromGitHub === 'function') {
-            console.warn('⚠️ [loadFromCloudComplete] Appwrite入口缺失，临时降级到 loadFromGitHub()');
-            return window.loadFromGitHub();
+            console.log('✅ [loadFromCloudComplete] 调用GitHub加载功能');
+            window.loadFromGitHub();
+        } else {
+            console.warn('⚠️ [loadFromCloudComplete] GitHub加载功能未初始化');
+            alert('⚠️ GitHub云端同步功能初始化中\n\n请稍等片刻后重试\n\n如果持续出现此问题，请刷新页面');
         }
-        alert('⚠️ 云端下载入口未初始化，请刷新页面后重试');
     } catch (error) {
         console.error('❌ [loadFromCloudComplete] 从云端加载失败:', error);
         console.error('❌ [loadFromCloudComplete] 错误堆栈:', error.stack);
         alert('❌ 加载失败\n\n错误信息: ' + error.message + '\n\n请查看控制台获取详细信息');
     }
 };
-
 
 // 3. 备份管理函数
 window.openBackupManagerComplete = function(){ try{ alert('ℹ️ 备份管理器（备份历史列表/恢复/删除）已移除'); }catch(e){} };
@@ -29707,15 +29707,32 @@ window.__tpi_syncDateToMain = function(){
         throw new Error('DATABASE_ID/COLLECTION_ID 未配置：请检查 Appwrite 配置区');
       }
       const dateStr = __tpi_getSyncDate();
-      console.log(`📅 [下载] 同步日期: ${dateStr || '未选择'}`);
+      console.log(`📅 [上传] 同步日期: ${dateStr || '未选择'}`);
       if(!dateStr){
-        console.error('❌ [下载] 失败: 未选择同步日期');
+        console.error('❌ [上传] 失败: 未选择同步日期');
         showModal?.({type:'error', title:'操作失败', message:'❌ 请先选择同步日期', confirmText:'知道了'});
         return;
       }
 
       // 1) 确保把“当前页面输入”写入本地（否则云端拿到的是旧数据）
       __tpi_setMainDate(dateStr);
+      
+      // ✅ [同步修复] 上传前强制重新计算所有分数（确保分数是最新的）
+      try {
+        console.log('[上传] 开始重新计算分数...');
+        if (typeof calculateAllScores === 'function') {
+          calculateAllScores();
+          console.log('[上传] calculateAllScores 完成');
+        } else if (typeof calculateTPI === 'function') {
+          calculateTPI();
+          console.log('[上传] calculateTPI 完成');
+        }
+        // 等待计算完成
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch(e) {
+        console.warn('[上传] 分数计算失败(继续上传):', e);
+      }
+      
       if(typeof saveToLocalStorage === 'function'){
         try{ saveToLocalStorage(); }catch(e){ console.warn('[云同步] saveToLocalStorage 调用失败(忽略):', e); }
       }
@@ -29735,8 +29752,8 @@ window.__tpi_syncDateToMain = function(){
       const user = await __tpi_getAuth();
       const userId = user.$id;
       const docId = __tpi_makeDocId(userId, dateStr);
-      console.log(`🆔 [下载] 用户ID: ${userId}`);
-      console.log(`📝 [下载] 文档ID: ${docId}`);
+      console.log(`🆔 [上传] 用户ID: ${userId}`);
+      console.log(`📝 [上传] 文档ID: ${docId}`);
 
       const docData = { data: dataStr, userId, date: dateStr };
 
@@ -29811,9 +29828,9 @@ window.__tpi_syncDateToMain = function(){
     console.log('📥 [云同步] 开始下载数据...');
     const __download_start_time = Date.now();
       const dateStr = __tpi_getSyncDate();
-      console.log(`📅 [下载] 同步日期: ${dateStr || '未选择'}`);
+      console.log(`📅 [上传] 同步日期: ${dateStr || '未选择'}`);
       if(!dateStr){
-        console.error('❌ [下载] 失败: 未选择同步日期');
+        console.error('❌ [上传] 失败: 未选择同步日期');
         showModal?.({type:'error', title:'操作失败', message:'❌ 请先选择同步日期', confirmText:'知道了'});
         return;
       }
@@ -29821,8 +29838,8 @@ window.__tpi_syncDateToMain = function(){
       const user = await __tpi_getAuth();
       const userId = user.$id;
       const docId = __tpi_makeDocId(userId, dateStr);
-      console.log(`🆔 [下载] 用户ID: ${userId}`);
-      console.log(`📝 [下载] 文档ID: ${docId}`);
+      console.log(`🆔 [上传] 用户ID: ${userId}`);
+      console.log(`📝 [上传] 文档ID: ${docId}`);
 
       const doc = await databases.getDocument(__DB_ID, __COL_ID, docId);
 
@@ -29839,79 +29856,50 @@ window.__tpi_syncDateToMain = function(){
       }
 
       // 先清空再恢复，避免“残留旧值”导致差异
-// 但保留少量“设备本地”键（不参与跨设备同步），避免误判为缓存或破坏本机标识
-const __preserveKeys = ['tpi_device_id', 'tpi_error_log'];
-const __preserved = {};
-try{
-  __preserveKeys.forEach(k => { const v = __tpi_ls_get(k); if (v != null) __preserved[k] = v; });
-}catch(e){}
+      const beforeKeys = __tpi_ls_length(0);
+      __tpi_ls_clear();
+      for(const [k,v] of Object.entries(payload)){
+        __tpi_ls_set(k, v);
+      }
+      console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
-const beforeKeys = __tpi_ls_length(0);
-__tpi_ls_clear();
-
-// 恢复云端 payload
-for(const [k,v] of Object.entries(payload)){
-  __tpi_ls_set(k, v);
-}
-// 回写本地保留键（若云端也有同名键，以云端为准；只有云端缺失时才回写）
-try{
-  Object.keys(__preserved).forEach(k => {
-    if (__tpi_ls_get(k) == null) __tpi_ls_set(k, __preserved[k]);
-  });
-}catch(e){}
-
-console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
-
-// 让页面把 localStorage 重新渲染到 UI
+      // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
-
-      // ✅ 关键修复：不同版本可能只有 TPI.loadFromLocalStorage（而不是全局 loadFromLocalStorage）
-      // 同时，为确保“分数/评级/看板/徽章”等规则生成内容真实刷新，额外触发一次完整恢复链路
-      let __uiRestored = false;
-
-      // 1) 优先走系统对象方法（更稳定）
-      try{
-        if (window.TPI && typeof window.TPI.loadFromLocalStorage === 'function') {
-          window.TPI.loadFromLocalStorage();
-          __uiRestored = true;
-          console.log('✅ [下载] UI恢复完成 (TPI.loadFromLocalStorage)');
-        }
-      }catch(e){ console.warn('[云同步] TPI.loadFromLocalStorage 调用失败(忽略):', e); }
-
-      // 2) 兼容：旧全局函数
-      if(!__uiRestored && typeof window.loadFromLocalStorage === 'function'){
-        try{
-          window.loadFromLocalStorage();
-          __uiRestored = true;
+      if(typeof loadFromLocalStorage === 'function'){
+        try{ 
+          loadFromLocalStorage(); 
           console.log('✅ [下载] UI恢复完成 (loadFromLocalStorage)');
         }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
-      }
-
-      // 3) 兜底：直接按“所选日期的日数据”调用 restoreUIFromData（确保所有输入/勾选/派生展示一致）
-      if (typeof window.restoreUIFromData === 'function') {
-        try{
-          const dayData = (typeof window.getTpiDayData === 'function') ? window.getTpiDayData(dateStr) : null;
-          if (dayData) {
-            window.restoreUIFromData(dayData);
-            __uiRestored = true;
-            console.log('✅ [下载] UI恢复完成 (restoreUIFromData + getTpiDayData)');
-          }
-        }catch(e){ console.warn('[云同步] restoreUIFromData(getTpiDayData) 失败(忽略):', e); }
-      }
-
-      // 4) 最终兜底：如果仍未恢复，才刷新页面（刷新会让各模块基于 localStorage 重新初始化）
-      if(!__uiRestored){
-        console.log('ℹ️ [下载] 未发现可用的UI恢复函数，使用页面刷新方式恢复');
+      }else{
+        // 兜底：刷新页面（保证 UI 和 localStorage 一致）
+        console.log('ℹ️ [下载] 使用页面刷新方式恢复UI');
         try{ location.reload(); }catch(_){}
       }
 
-      // 保底：触发一次重新计算，避免“只有签到/雷达/杂事显示，其它分数/评级没刷新”
-      try{
-        if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc();
-        else if (typeof window.calculateTPI === 'function') window.calculateTPI();
-      }catch(e){}
+      // ✅ [同步修复] 下载后强制重新计算所有分数（确保UI完全更新）
+      setTimeout(() => {
+        try {
+          console.log('[下载] 延迟触发分数重算...');
+          if (typeof calculateAllScores === 'function') {
+            calculateAllScores();
+            console.log('[下载] calculateAllScores 完成');
+          } else if (typeof calculateTPI === 'function') {
+            calculateTPI();
+            console.log('[下载] calculateTPI 完成');
+          }
+          // 同时触发子系统计算
+          if (typeof calculateBCM === 'function') calculateBCM();
+          if (typeof calculateLogistics === 'function') calculateLogistics();
+          if (typeof calculateHSM === 'function') calculateHSM();
+          if (typeof calculateBonus === 'function') calculateBonus();
+          console.log('[下载] 所有分数重算完成');
+        } catch (e) {
+          console.warn('[下载] 分数重算失败:', e);
+        }
+      }, 500);
 
-const __download_end_time = Date.now();
+
+      const __download_end_time = Date.now();
       console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
 
       // 计算更详细的统计信息
