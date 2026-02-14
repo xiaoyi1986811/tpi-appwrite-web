@@ -769,15 +769,34 @@ function __tpi_restoreViewState(viewState) {
 // 5) 触发重新计算（保证评分/评级/徽章等规则重跑）
 // 注意：不会影响"模块折叠"和"弹窗关闭"，它们是独立事件系统
 function __tpi_triggerRecalc() {
-  // 只触发计算,不触发所有输入框的事件(避免云端同步时产生大量错误)
+  // ✅ [同步修复] 触发完整的分数计算链（确保所有子系统分数都被重新计算）
   try {
-    if (typeof window.TPI !== 'undefined' && typeof window.TPI.calculateTPI === 'function') {
+    // 1. 先触发所有子系统的计算
+    if (typeof window.calculateAllScores === 'function') {
+      window.calculateAllScores();
+      console.log('[__tpi_triggerRecalc] calculateAllScores 已执行');
+    } else if (typeof window.TPI !== 'undefined' && typeof window.TPI.calculateTPI === 'function') {
       window.TPI.calculateTPI();
+      console.log('[__tpi_triggerRecalc] TPI.calculateTPI 已执行');
     }
+    
+    // 2. 确保BCM/Logistics/HSM等子系统也被计算
+    if (typeof calculateBCM === 'function') {
+      calculateBCM();
+    }
+    if (typeof calculateLogistics === 'function') {
+      calculateLogistics();
+    }
+    if (typeof calculateHSM === 'function') {
+      calculateHSM();
+    }
+    
+    console.log('[__tpi_triggerRecalc] 分数重新计算完成');
   } catch (e) {
-    console.warn('[__tpi_triggerRecalc] TPI计算失败:', e);
+    console.warn('[__tpi_triggerRecalc] 计算失败:', e);
   }
 }
+
 
 
 
@@ -934,6 +953,12 @@ window.collectDailyData = function() {
     const _ciRaw = __tpi_ls_get('tpi_checkin_data');
     if (_ciRaw) data["checkinData"] = JSON.parse(_ciRaw);
   } catch (_e) { console.warn('[collectDailyData] checkinData pack failed:', _e); }
+
+  // ✅ [同步修复] 打包计算分数（确保TPI/AMI/FLI/SYS/BONUS等计算结果被同步）
+  try {
+    const _calcRaw = __tpi_ls_get('tpi_calculated_scores_' + date);
+    if (_calcRaw) data["calculatedScores"] = JSON.parse(_calcRaw);
+  } catch (_e) { console.warn('[collectDailyData] calculatedScores pack failed:', _e); }
 
   // 新增：完整表单 + 规则生成视图
   data["_formState"] = __tpi_collectFormState();
@@ -1207,6 +1232,35 @@ const __fixEvents = (arr) => (arr || []).map((it, idx) => {
         window.__tpi_refreshCheckin();
       }
     } catch (_e) { console.warn('[restoreUIFromData] checkinData restore failed:', _e); }
+  }
+
+  // ✅ [同步修复] 恢复计算分数（先恢复到输入框，确保UI显示正确）
+  if (data["calculatedScores"]) {
+    try {
+      const scores = data["calculatedScores"];
+      // 恢复分数到对应的输入框（这些是readonly的，但可以设置value）
+      if (scores.ami !== undefined) {
+        const amiEl = document.getElementById('ami-score');
+        if (amiEl) amiEl.value = scores.ami;
+      }
+      if (scores.fli !== undefined) {
+        const fliEl = document.getElementById('fli-score');
+        if (fliEl) fliEl.value = scores.fli;
+      }
+      if (scores.sysNet !== undefined) {
+        const sysEl = document.getElementById('sys-score');
+        if (sysEl) sysEl.value = scores.sysNet.toFixed(1);
+      }
+      if (scores.bonus !== undefined) {
+        const bonusEl = document.getElementById('bonus-score');
+        if (bonusEl) bonusEl.value = scores.bonus.toFixed(1);
+      }
+      if (scores.tpi !== undefined) {
+        const tpiEl = document.getElementById('tpi-total');
+        if (tpiEl) tpiEl.value = scores.tpi.toFixed(1);
+      }
+      console.log('[restoreUIFromData] 计算分数已恢复:', scores);
+    } catch (_e) { console.warn('[restoreUIFromData] calculatedScores restore failed:', _e); }
   }
 
   // 最后：触发重新计算，保证分数/评级/徽章状态立刻正确
@@ -17606,6 +17660,25 @@ function calculateTPI() {
                     state.tpi = tpiTotal;
                     state.sysNet = sysNet;
 
+                    // ✅ [同步修复] 保存计算结果到 localStorage（确保云端同步能捕获分数）
+                    try {
+                        const dateStr = __tpi_getSelectedDate();
+                        if (dateStr) {
+                            const calcScores = {
+                                ami: ami,
+                                fli: fli,
+                                sysNet: sysNet,
+                                bonus: bonus,
+                                tpi: tpiTotal,
+                                selectedMode: selectedMode,
+                                timestamp: new Date().toISOString()
+                            };
+                            __tpi_ls_set(`tpi_calculated_scores_${dateStr}`, JSON.stringify(calcScores));
+                        }
+                    } catch (e) {
+                        console.warn('[同步修复] 保存计算分数失败:', e);
+                    }
+
                     // 🔧 修复9: 复苏模式触发阈值 - TPI<95提示（改为轻量级通知）
                     if (tpiTotal < 95 && selectedMode !== 'recovery') {
                         console.warn(`📉 [建议] TPI=${tpiTotal.toFixed(1)} < 95，建议切换至复苏模式`);
@@ -18353,6 +18426,22 @@ try {
                     /* 已添加错误处理 */ __tpi_ls_set(key, dataStr);
                     state.formData = data;
 
+                    // ✅ [同步修复] 同时保存当前计算分数（确保下次加载时能恢复）
+                    try {
+                        const calcScores = {
+                            ami: safeParseFloat(document.getElementById('ami-score')?.value || 0),
+                            fli: safeParseFloat(document.getElementById('fli-score')?.value || 0),
+                            sysNet: safeParseFloat(document.getElementById('sys-score')?.value || 0),
+                            bonus: safeParseFloat(document.getElementById('bonus-score')?.value || 0),
+                            tpi: safeParseFloat(document.getElementById('tpi-total')?.value || 0),
+                            selectedMode: state.selectedMode || 'normal',
+                            timestamp: new Date().toISOString()
+                        };
+                        __tpi_ls_set(`tpi_calculated_scores_${dateInput}`, JSON.stringify(calcScores));
+                    } catch (e) {
+                        console.warn('[同步修复] 保存计算分数失败:', e);
+                    }
+
                     // v15: 更新存储空间指示器
                     updateStorageIndicator();
 
@@ -18519,6 +18608,38 @@ try {
 
                     restoreFormData(data);
                     state.formData = data;
+
+                    // ✅ [同步修复] 先恢复保存的计算分数（如果存在）
+                    try {
+                        const calcScoresStr = __tpi_ls_get(`tpi_calculated_scores_${dateInput}`);
+                        if (calcScoresStr) {
+                            const scores = JSON.parse(calcScoresStr);
+                            // 恢复分数到对应的输入框
+                            if (scores.ami !== undefined) {
+                                const amiEl = document.getElementById('ami-score');
+                                if (amiEl) amiEl.value = scores.ami;
+                            }
+                            if (scores.fli !== undefined) {
+                                const fliEl = document.getElementById('fli-score');
+                                if (fliEl) fliEl.value = scores.fli;
+                            }
+                            if (scores.sysNet !== undefined) {
+                                const sysEl = document.getElementById('sys-score');
+                                if (sysEl) sysEl.value = scores.sysNet.toFixed(1);
+                            }
+                            if (scores.bonus !== undefined) {
+                                const bonusEl = document.getElementById('bonus-score');
+                                if (bonusEl) bonusEl.value = scores.bonus.toFixed(1);
+                            }
+                            if (scores.tpi !== undefined) {
+                                const tpiEl = document.getElementById('tpi-total');
+                                if (tpiEl) tpiEl.value = scores.tpi.toFixed(1);
+                            }
+                            console.log('[loadFromLocalStorage] 计算分数已恢复:', scores);
+                        }
+                    } catch (e) {
+                        console.warn('[loadFromLocalStorage] 恢复计算分数失败，将重新计算:', e);
+                    }
 
                     // 重新计算所有分数
                     setTimeout(() => {
@@ -29858,6 +29979,23 @@ window.__tpi_syncDateToMain = function(){
         console.log('ℹ️ [下载] 使用页面刷新方式恢复UI');
         try{ location.reload(); }catch(_){}
       }
+
+      // ✅ [同步修复] 额外触发一次完整的分数重算（确保所有显示都更新）
+      setTimeout(() => {
+        try {
+          console.log('[下载] 触发分数重算...');
+          if (typeof calculateAllScores === 'function') {
+            calculateAllScores();
+            console.log('[下载] calculateAllScores 完成');
+          }
+          // 强制更新数据统计显示
+          if (typeof window.updateDataStats === 'function') {
+            window.updateDataStats();
+          }
+        } catch (e) {
+          console.warn('[下载] 分数重算失败:', e);
+        }
+      }, 500);
 
       const __download_end_time = Date.now();
       console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
