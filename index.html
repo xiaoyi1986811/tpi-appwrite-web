@@ -19324,14 +19324,9 @@ try {
              * 更新统计数据
              */
             function updateStatistics() {
-                console.log('[DataStats] 更新统计被调用');
-                
                 try {
                     const history = getHistoricalData();
-                    console.log('[DataStats] 获取历史数据，共', history.length, '条记录');
-                    
                     const stats = calculateStatistics(history);
-                    console.log('[DataStats] 统计数据:', stats);
 
                     // 更新显示
                     const daysCountElem = document.getElementById('stats-days-count');
@@ -19344,8 +19339,6 @@ try {
 
                     // 更新状态
                     state.dataStats = stats;
-                    
-                    console.log('[DataStats] 统计更新完成');
 
                 } catch (error) {
                     console.error('[DataStats] 更新统计错误:', error);
