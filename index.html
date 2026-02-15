@@ -5112,22 +5112,24 @@ window.exportAsCSV = function() {
   </div>
 
   <!-- 登录区 -->
-  <div id="tpi-auth-panel" style="max-width: 100%;">
-    <div style="display:flex; gap:24px; align-items:center;">
-      <div style="display:flex; align-items:center; gap:10px; flex:2;">
-        <label for="tpi-username" style="font-weight:600; color:#374151; white-space:nowrap;">邮箱:</label>
-        <input id="tpi-username" type="text" placeholder="请输入邮箱" style="flex:1; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+  <div id="tpi-auth-panel" style="max-width: 820px;">
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+      <div class="form-group" style="min-width:260px; flex:1;">
+        <label for="tpi-username" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">邮箱:</label>
+        <input id="tpi-username" type="text" placeholder="请输入邮箱" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
       </div>
-      <div style="display:flex; align-items:center; gap:10px; flex:2;">
-        <label for="tpi-password" style="font-weight:600; color:#374151; white-space:nowrap;">密码:</label>
-        <input id="tpi-password" type="password" placeholder="请输入密码" style="flex:1; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+      <div class="form-group" style="min-width:260px; flex:1;">
+        <label for="tpi-password" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">密码:</label>
+        <input id="tpi-password" type="password" placeholder="请输入密码" style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
       </div>
-      <button type="button" onclick="tpiRegister()" style="flex:1.5; padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; white-space: nowrap;">
-        🆕 注册新账号
-      </button>
-      <button type="button" onclick="tpiLogin()" style="flex:1.2; padding:12px 20px; background: linear-gradient(135deg,#10b981,#059669); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer; white-space: nowrap;">
-        ✅ 登录
-      </button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button type="button" onclick="tpiRegister()" style="padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
+          🆕 注册新账号
+        </button>
+        <button type="button" onclick="tpiLogin()" style="padding:12px 20px; background: linear-gradient(135deg,#10b981,#059669); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
+          ✅ 登录
+        </button>
+      </div>
     </div>
     <div id="tpi-login-msg" style="margin-top:10px; font-size:14px;"></div>
   </div>
@@ -27731,8 +27733,8 @@ try{
     }
   };
 
-  // ✅ 新增：清空“今日表单缓存”（不包含未来事件雷达/杂事记录）
-  // 作用：删除本地今日快照/草稿，让页面刷新后回到“干净的今日”状态
+  // ✅ 完整增强版：清空所有内容（输入+动态生成的分数/评级）
+  // 排除：未来事件雷达、杂事记录、配置信息
   window.TPI.clearTodayCache = function(){
     try{
       // 以 date-input 为准；若为空则回退到本地日期
@@ -27750,35 +27752,228 @@ try{
       }
 
       const msg =
-        `确认要清空【${dateKey}】的“今日表单缓存”吗？\n\n` +
-        `将删除（如存在）：\n` +
-        `- tpi_data_${dateKey}\n` +
-        `- tpi_temp_snapshot_${dateKey}\n` +
-        `- tpi_data_v14_final__v14_final_${dateKey}\n\n` +
-        `⚠️ 不会删除：未来事件雷达、杂事记录、以及任何云端数据。\n` +
-        `清空后页面会自动刷新，打开将是“干净的今日”。`;
+        `确认要清空【${dateKey}】的所有内容吗？\n\n` +
+        `将清空：\n` +
+        `✓ 所有输入框、文本域、复选框\n` +
+        `✓ 所有动态生成的分数、评级、规则\n` +
+        `✓ 本地缓存数据\n\n` +
+        `✗ 不会清空：未来事件雷达、杂事记录、配置、云端数据\n\n` +
+        `清空后页面将立即更新为空白状态。`;
 
       if (!confirm(msg)) return;
 
-      // 只清除“按日表单缓存/临时快照”，不触碰 futureRadar / misc
+      // ============ 辅助函数 ============
+      // 判断元素是否在排除区域（未来事件雷达、杂事记录）
+      function isInExcludedSection(element) {
+        let parent = element.parentElement;
+        let depth = 0;
+        while (parent && depth < 15) {
+          const text = (parent.textContent || '').substring(0, 200);
+          const className = parent.className || '';
+          const id = parent.id || '';
+          
+          if (
+            text.includes('未来事件雷达') ||
+            text.includes('杂事记录') ||
+            className.includes('future') ||
+            className.includes('radar') ||
+            className.includes('misc') ||
+            id.includes('future') ||
+            id.includes('radar') ||
+            id.includes('misc') ||
+            id === 'future-radar' ||
+            id === 'misc-records'
+          ) {
+            return true;
+          }
+          parent = parent.parentElement;
+          depth++;
+        }
+        return false;
+      }
+      
+      // 判断是否是配置输入框
+      function isConfigInput(element) {
+        const placeholder = element.placeholder || '';
+        const name = element.name || '';
+        const id = element.id || '';
+        const parent = element.parentElement;
+        const parentText = parent ? (parent.textContent || '').substring(0, 100) : '';
+        
+        return (
+          id === 'date-input' ||
+          placeholder.includes('token') ||
+          placeholder.includes('GitHub') ||
+          placeholder.includes('Appwrite') ||
+          placeholder.includes('配置') ||
+          name.includes('config') ||
+          id.includes('github') ||
+          id.includes('appwrite') ||
+          parentText.includes('配置') ||
+          parentText.includes('设置')
+        );
+      }
+      
+      let clearedCount = 0;
+      
+      console.log('🧹 [清空今日] 开始清空所有内容...');
+
+      // ============ 第一步：清空表单输入 ============
+      // 清空所有文本输入框
+      document.querySelectorAll('input[type="text"], input[type="email"], input[type="url"], input[type="number"]').forEach(input => {
+        if (!isInExcludedSection(input) && !isConfigInput(input)) {
+          input.value = '';
+          clearedCount++;
+        }
+      });
+      
+      // 清空所有文本域
+      document.querySelectorAll('textarea').forEach(textarea => {
+        if (!isInExcludedSection(textarea)) {
+          textarea.value = '';
+          clearedCount++;
+        }
+      });
+      
+      // 清空所有时间输入
+      document.querySelectorAll('input[type="time"]').forEach(input => {
+        if (!isInExcludedSection(input)) {
+          input.value = '';
+          clearedCount++;
+        }
+      });
+      
+      // 清空所有范围滑块
+      document.querySelectorAll('input[type="range"]').forEach(input => {
+        if (!isInExcludedSection(input)) {
+          input.value = input.min || 0;
+          try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}
+          clearedCount++;
+        }
+      });
+      
+      // 取消所有复选框
+      document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        if (!isInExcludedSection(checkbox)) {
+          checkbox.checked = false;
+          try { checkbox.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+          clearedCount++;
+        }
+      });
+      
+      // 重置所有单选按钮组
+      document.querySelectorAll('input[type="radio"]').forEach(radio => {
+        if (!isInExcludedSection(radio)) {
+          radio.checked = false;
+          clearedCount++;
+        }
+      });
+      
+      // 重置所有下拉选择框（除了配置相关）
+      document.querySelectorAll('select').forEach(select => {
+        if (!isInExcludedSection(select) && !isConfigInput(select)) {
+          select.selectedIndex = 0;
+          clearedCount++;
+        }
+      });
+
+      console.log(`  ✓ 已清空 ${clearedCount} 个表单输入`);
+
+      // ============ 第二步：清空动态生成的分数和评级显示 ============
+      let dynamicCount = 0;
+      
+      // 清空所有分数相关的span和div显示（通过ID匹配）
+      const scoreIds = [
+        'tpi-total-score', 'tpi-total', 'tpi-rating',
+        'academic-score', 'personal-score', 'life-score', 'logistics-score',
+        'ma7-score', 'ami-score', 'fli-score', 'sys-score', 'bonus-score',
+        'bcm-morning-score', 'bcm-evening-score', 'bcm-sleep-score',
+        'bcm-digital-score', 'bcm-afternoon-score', 'bcm-total-score',
+        'bcm-lunch-score', 'bcm-dinner-score',
+        'hsm-core-score', 'hsm-morning-score', 'hsm-afternoon-score',
+        'hsm-water-morning-score', 'hsm-water-afternoon-score', 'hsm-water-evening-score',
+        'fli-core-score', 'fli-fragment-score', 'fli-total-score',
+        'logistics-total-score'
+      ];
+      
+      scoreIds.forEach(id => {
+        const elem = document.getElementById(id);
+        if (elem && !isInExcludedSection(elem)) {
+          if (elem.tagName === 'INPUT' || elem.tagName === 'SELECT') {
+            elem.value = '';
+          } else {
+            elem.textContent = '';
+          }
+          dynamicCount++;
+        }
+      });
+      
+      // 清空所有带score类名或ID包含score的只读输入框和显示元素
+      document.querySelectorAll('[readonly], .score-display, [id*="score"], [id*="rating"]').forEach(elem => {
+        if (!isInExcludedSection(elem) && !isConfigInput(elem)) {
+          const id = elem.id || '';
+          const className = elem.className || '';
+          
+          // 只清空明确是分数/评级相关的元素
+          if (id.includes('score') || id.includes('rating') || id.includes('total') ||
+              className.includes('score') || className.includes('rating')) {
+            if (elem.tagName === 'INPUT' || elem.tagName === 'SELECT') {
+              elem.value = '';
+            } else {
+              elem.textContent = '';
+            }
+            dynamicCount++;
+          }
+        }
+      });
+
+      console.log(`  ✓ 已清空 ${dynamicCount} 个动态生成的显示元素`);
+
+      // ============ 第三步：清空localStorage缓存 ============
       __tpi_ls_remove(`tpi_data_${dateKey}`);
       __tpi_ls_remove(`tpi_temp_snapshot_${dateKey}`);
       __tpi_ls_remove(`tpi_data_v14_final__v14_final_${dateKey}`);
-
-      // 避免“强制复苏”标记导致自动回填
       __tpi_ls_remove('force_recovery_mode');
       __tpi_ls_remove('force_recovery_reason');
       __tpi_ls_remove('force_recovery_date');
 
       try{ if (typeof window.updateStorageIndicator === 'function') window.updateStorageIndicator(); }catch(e){}
 
+      console.log(`  ✓ 已清空localStorage缓存`);
+
+      // ============ 第四步：重新触发计算（将所有分数重置为0） ============
+      try {
+        if (typeof window.RealtimeCalculator !== 'undefined' && 
+            typeof window.RealtimeCalculator.recalculate === 'function') {
+          setTimeout(() => {
+            window.RealtimeCalculator.recalculate();
+            console.log('  ✓ 已重新计算分数（全部重置为0）');
+          }, 100);
+        }
+      } catch(e) {
+        console.log('  ⚠️ 分数重算跳过（RealtimeCalculator未就绪）');
+      }
+
+      // ============ 第五步：显示成功提示 ============
+      const totalCleared = clearedCount + dynamicCount;
       try{
-        if (window.tpiToast) window.tpiToast(`🧹 已清空 ${dateKey} 的今日表单缓存（不含未来事件雷达/杂事记录），页面即将刷新`, 'success');
-        else if (window.showNotification) window.showNotification(`🧹 已清空 ${dateKey} 的今日表单缓存（不含未来事件雷达/杂事记录），页面即将刷新`, 'success');
-        else alert(`已清空 ${dateKey} 的今日表单缓存（不含未来事件雷达/杂事记录），页面即将刷新`);
+        if (window.tpiToast) {
+          window.tpiToast(
+            `🧹 已清空 ${dateKey} 的所有内容\n` +
+            `表单输入: ${clearedCount} 项\n` +
+            `动态显示: ${dynamicCount} 项\n` +
+            `（不含未来事件雷达/杂事记录）`,
+            'success'
+          );
+        } else if (window.showNotification) {
+          window.showNotification(`🧹 已清空 ${totalCleared} 项内容`, 'success');
+        } else {
+          alert(`✅ 已清空 ${dateKey} 的所有内容\n共清空 ${totalCleared} 项\n（不含未来事件雷达/杂事记录）`);
+        }
       }catch(e){}
 
-      setTimeout(()=>{ try{ location.reload(); }catch(e){} }, 600);
+      console.log(`✅ [清空今日] 全部完成 - 共清空 ${totalCleared} 项`);
+      
     }catch(e){
       console.error('⛔ clearTodayCache failed:', e);
       try{
@@ -27787,6 +27982,7 @@ try{
       }catch(_){}
     }
   };
+
 
 
 
