@@ -430,7 +430,6 @@ window.__tpi_legacy_loadTpiData_1 = function () {
     try{ if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc(); }catch(e){}
     // 2.1) 额外保险：刷新分数看板/统计（如果存在）
     try{ if (window.ScoreDashboard && typeof window.ScoreDashboard.update === 'function') window.ScoreDashboard.update(); }catch(e){}
-    try{ if (window.TPI && typeof window.TPI.updateStatistics === 'function') window.TPI.updateStatistics(); }catch(e){}
 
     // 3) 采集快照（包含 _formState + _viewState + 各模块补丁字段）
     let snapObj = null;
@@ -555,7 +554,7 @@ window.__tpi_legacy_loadTpiData_1 = function () {
 
       try{ __tpi_ls_set('tpi_last_manual_backup', String(Date.now())); }catch(e){}
       _toast('✅ 导出成功（已包含当前输入/勾选与页面当前内容）', 'success');
-      _removeBackupBannerIfAny();
+      _toast('✅ 导出成功！已完整导出当前页面所有内容', 'success');
     }catch(e){
       console.error('[exportCurrentSnapshot] failed:', e);
       _toast('❌ 导出失败：请查看控制台错误信息', 'error');
@@ -792,6 +791,47 @@ function __tpi_collectViewState() {
     view[`#${id}`] = { text };
   });
 
+  // ✅ 收集图表Canvas状态
+  try {
+    const trendCanvas = document.getElementById('trendChart');
+    if (trendCanvas && trendCanvas.toDataURL) {
+      view['#trendChart-data'] = { 
+        type: 'canvas',
+        dataURL: trendCanvas.toDataURL('image/png')
+      };
+    }
+  } catch(e) {}
+
+  try {
+    const heatmapCanvas = document.getElementById('heatmapCalendar');
+    if (heatmapCanvas && heatmapCanvas.toDataURL) {
+      view['#heatmapCalendar-data'] = {
+        type: 'canvas',
+        dataURL: heatmapCanvas.toDataURL('image/png')
+      };
+    }
+  } catch(e) {}
+
+  // ✅ 收集徽章状态
+  try {
+    const badges = document.querySelectorAll('.badge-item');
+    const badgeStates = [];
+    badges.forEach(badge => {
+      const isUnlocked = badge.classList.contains('unlocked');
+      const name = badge.querySelector('.badge-name');
+      const progress = badge.querySelector('.badge-progress');
+      if (name) {
+        badgeStates.push({
+          name: name.textContent,
+          unlocked: isUnlocked,
+          progress: progress ? progress.textContent : ''  
+        });
+      }
+    });
+    if (badgeStates.length > 0) {
+      view['#badges-state'] = { badges: badgeStates };
+    }
+  } catch(e) {}
 
   return view;
 }
@@ -15519,6 +15559,34 @@ const TPI = (function() {
                 const historyKey = 'tpi_history';
                 let history = JSON.parse(/* 已添加错误处理 */ __tpi_ls_get(historyKey) || '[]');
 
+                // 从完整数据库补充缺失信息
+                try {
+                    const enhanced = [];
+                    for (const item of history) {
+                        if (!item.bcm && !item.hsm && !item.ami) {
+                            const dayData = JSON.parse(__tpi_ls_get(`tpi_data_${item.date}`) || 'null');
+                            if (dayData) {
+                                enhanced.push({
+                                    ...item,
+                                    ami: dayData.ami || 0,
+                                    fli: dayData.fli || 0,
+                                    bcm: dayData.bcm || 0,
+                                    hsm: dayData.hsm || 0,
+                                    logistics: dayData.logistics || 0,
+                                    bonus: dayData.bonus || 0
+                                });
+                            } else {
+                                enhanced.push(item);
+                            }
+                        } else {
+                            enhanced.push(item);
+                        }
+                    }
+                    history = enhanced;
+                } catch (e) {
+                    console.warn('[getHistoricalData] 补充失败:', e);
+                }
+
                 // 如果指定天数，只返回最近的数据
                 if (days && days > 0) {
                     history = history.slice(-days);
@@ -18557,7 +18625,14 @@ try {
                         timestamp: data.timestamp,
                         tpi: safeParseFloat(document.getElementById('tpi-total')?.value || 0),
                         totalWords: data.totalWords || 0,
-                        totalPages: data.totalPages || 0
+                        totalPages: data.totalPages || 0,
+                        // 完整分数用于徽章和趋势
+                        ami: safeParseFloat(document.getElementById('ami-score')?.value || 0),
+                        fli: safeParseFloat(document.getElementById('fli-score')?.value || 0),
+                        bcm: safeParseFloat(document.getElementById('bcm-total-score')?.textContent || document.getElementById('bcm-total-score')?.value || 0),
+                        hsm: safeParseFloat(document.getElementById('hsm-total-score')?.textContent || document.getElementById('hsm-total-score')?.value || 0),
+                        logistics: safeParseFloat(document.getElementById('logistics-total-score')?.textContent || document.getElementById('logistics-total-score')?.value || 0),
+                        bonus: safeParseFloat(document.getElementById('bonus-total-score')?.textContent || document.getElementById('bonus-total-score')?.value || 0)
                     };
 
                     if (existingIndex >= 0) {
@@ -30126,8 +30201,8 @@ window.__tpi_syncDateToMain = function(){
         throw new Error('云端数据解析失败（data 不是有效 JSON 字符串）');
       }
 
-      // 先清空再恢复，避免“残留旧值”导致差异
-// 但保留少量“设备本地”键（不参与跨设备同步），避免误判为缓存或破坏本机标识
+      // 先清空再恢复，避免"残留旧值"导致差异
+// 但保留少量"设备本地"键（不参与跨设备同步），避免误判为缓存或破坏本机标识
 const __preserveKeys = ['tpi_device_id', 'tpi_error_log'];
 const __preserved = {};
 try{
@@ -30153,51 +30228,165 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
 // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
 
-      // ✅ 关键修复：不同版本可能只有 TPI.loadFromLocalStorage（而不是全局 loadFromLocalStorage）
-      // 同时，为确保“分数/评级/看板/徽章”等规则生成内容真实刷新，额外触发一次完整恢复链路
+      // ✅ 【关键修复】：强制使用restoreUIFromData进行完整恢复
+      // 这确保所有输入、勾选、分数、评级、图表等都能被正确恢复
       let __uiRestored = false;
-
-      // 1) 优先走系统对象方法（更稳定）
-      try{
-        if (window.TPI && typeof window.TPI.loadFromLocalStorage === 'function') {
-          window.TPI.loadFromLocalStorage();
-          __uiRestored = true;
-          console.log('✅ [下载] UI恢复完成 (TPI.loadFromLocalStorage)');
+      
+      console.log('🔄 [下载] 开始恢复UI状态...');
+      
+      // 步骤1：从localStorage构建完整的日数据对象
+      let dayData = null;
+      try {
+        if (typeof window.getTpiDayData === 'function') {
+          dayData = window.getTpiDayData(dateStr);
+          console.log('✅ [下载] 成功获取日数据对象:', dayData ? '有数据' : '无数据');
         }
-      }catch(e){ console.warn('[云同步] TPI.loadFromLocalStorage 调用失败(忽略):', e); }
-
-      // 2) 兼容：旧全局函数
-      if(!__uiRestored && typeof window.loadFromLocalStorage === 'function'){
-        try{
-          window.loadFromLocalStorage();
+      } catch(e) {
+        console.warn('⚠️ [下载] getTpiDayData调用失败:', e);
+      }
+      
+      // 步骤2：使用restoreUIFromData恢复所有UI（这是最完整的恢复方法）
+      if (dayData && typeof window.restoreUIFromData === 'function') {
+        try {
+          console.log('🔧 [下载] 调用restoreUIFromData恢复UI...');
+          window.restoreUIFromData(dayData);
           __uiRestored = true;
-          console.log('✅ [下载] UI恢复完成 (loadFromLocalStorage)');
-        }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
+          console.log('✅ [下载] UI恢复完成 (restoreUIFromData)');
+        } catch(e) {
+          console.error('❌ [下载] restoreUIFromData失败:', e);
+        }
+      }
+      
+      // 步骤3：额外调用系统的loadFromLocalStorage（如果存在）作为补充
+      try {
+        if (window.TPI && typeof window.TPI.loadFromLocalStorage === 'function') {
+          console.log('🔧 [下载] 调用TPI.loadFromLocalStorage作为补充...');
+          window.TPI.loadFromLocalStorage();
+          console.log('✅ [下载] TPI.loadFromLocalStorage补充完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] TPI.loadFromLocalStorage补充失败(忽略):', e);
+      }
+      
+      // 步骤4：调用全局loadFromLocalStorage（如果存在）作为额外补充
+      try {
+        if (typeof window.loadFromLocalStorage === 'function') {
+          console.log('🔧 [下载] 调用loadFromLocalStorage作为额外补充...');
+          window.loadFromLocalStorage();
+          console.log('✅ [下载] loadFromLocalStorage补充完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] loadFromLocalStorage补充失败(忽略):', e);
       }
 
-      // 3) 兜底：直接按“所选日期的日数据”调用 restoreUIFromData（确保所有输入/勾选/派生展示一致）
-      if (typeof window.restoreUIFromData === 'function') {
-        try{
-          const dayData = (typeof window.getTpiDayData === 'function') ? window.getTpiDayData(dateStr) : null;
-          if (dayData) {
-            window.restoreUIFromData(dayData);
-            __uiRestored = true;
-            console.log('✅ [下载] UI恢复完成 (restoreUIFromData + getTpiDayData)');
+      // 步骤5：【关键】触发所有必要的重新计算和UI刷新
+      console.log('🔄 [下载] 开始触发重新计算和UI刷新...');
+      
+      // 5.1 触发TPI分数计算
+      try {
+        if (window.TPI && typeof window.TPI.calculateTPI === 'function') {
+          console.log('🔧 [下载] 触发TPI.calculateTPI...');
+          window.TPI.calculateTPI();
+          console.log('✅ [下载] TPI.calculateTPI完成');
+        } else if (typeof window.calculateTPI === 'function') {
+          console.log('🔧 [下载] 触发calculateTPI...');
+          window.calculateTPI();
+          console.log('✅ [下载] calculateTPI完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] calculateTPI失败(忽略):', e);
+      }
+      
+      // 5.2 触发__tpi_triggerRecalc（如果存在）
+      try {
+        if (typeof window.__tpi_triggerRecalc === 'function') {
+          console.log('🔧 [下载] 触发__tpi_triggerRecalc...');
+          window.__tpi_triggerRecalc();
+          console.log('✅ [下载] __tpi_triggerRecalc完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] __tpi_triggerRecalc失败(忽略):', e);
+      }
+      
+      // 5.3 刷新未来事件雷达（确保雷达数据显示正确）
+      try {
+        if (window.FutureRadar) {
+          console.log('🔧 [下载] 刷新FutureRadar...');
+          if (typeof window.FutureRadar.loadData === 'function') {
+            window.FutureRadar.loadData();
           }
-        }catch(e){ console.warn('[云同步] restoreUIFromData(getTpiDayData) 失败(忽略):', e); }
+          if (typeof window.FutureRadar.reload === 'function') {
+            window.FutureRadar.reload();
+          } else if (typeof window.FutureRadar.render === 'function') {
+            window.FutureRadar.render();
+          }
+          console.log('✅ [下载] FutureRadar刷新完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] FutureRadar刷新失败(忽略):', e);
       }
-
-      // 4) 最终兜底：如果仍未恢复，才刷新页面（刷新会让各模块基于 localStorage 重新初始化）
-      if(!__uiRestored){
-        console.log('ℹ️ [下载] 未发现可用的UI恢复函数，使用页面刷新方式恢复');
-        try{ location.reload(); }catch(_){}
+      
+      // 5.4 刷新杂事记录（确保杂事记录显示正确）
+      try {
+        if (window.MiscLog && typeof window.MiscLog.render === 'function') {
+          console.log('🔧 [下载] 刷新MiscLog...');
+          window.MiscLog.render();
+          console.log('✅ [下载] MiscLog刷新完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] MiscLog刷新失败(忽略):', e);
       }
-
-      // 保底：触发一次重新计算，避免“只有签到/雷达/杂事显示，其它分数/评级没刷新”
-      try{
-        if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc();
-        else if (typeof window.calculateTPI === 'function') window.calculateTPI();
-      }catch(e){}
+      
+      // 5.5 刷新签到状态（确保签到状态显示正确）
+      try {
+        if (typeof window.__tpi_refreshCheckin === 'function') {
+          console.log('🔧 [下载] 刷新签到状态...');
+          window.__tpi_refreshCheckin();
+          console.log('✅ [下载] 签到状态刷新完成');
+        } else if (typeof window.updateCheckInStatus === 'function') {
+          console.log('🔧 [下载] 刷新签到状态(updateCheckInStatus)...');
+          window.updateCheckInStatus();
+          console.log('✅ [下载] 签到状态刷新完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] 签到状态刷新失败(忽略):', e);
+      }
+      
+      // 5.6 刷新模式选择（确保模式卡片显示正确）
+      try {
+        const selectedMode = __tpi_ls_get('selectedMode');
+        if (selectedMode && window.TPI && typeof window.TPI.selectMode === 'function') {
+          console.log('🔧 [下载] 恢复模式选择:', selectedMode);
+          window.TPI.selectMode(selectedMode);
+          console.log('✅ [下载] 模式选择恢复完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] 模式选择恢复失败(忽略):', e);
+      }
+      
+      // 5.7 触发所有输入框的change事件（确保关联的UI更新）
+      try {
+        console.log('🔧 [下载] 触发输入框change事件...');
+        document.querySelectorAll('input, select, textarea').forEach(el => {
+          try {
+            const event = new Event('change', { bubbles: true });
+            el.dispatchEvent(event);
+          } catch(e) {}
+        });
+        console.log('✅ [下载] 输入框change事件触发完成');
+      } catch(e) {
+        console.warn('⚠️ [下载] 触发change事件失败(忽略):', e);
+      }
+      
+      console.log('✅ [下载] 所有UI刷新和重新计算完成');
+      
+      // 步骤6：最终兜底 - 如果完全没有恢复成功，才刷新页面
+      if (!__uiRestored && !dayData) {
+        console.log('⚠️ [下载] 未能通过函数恢复UI，将刷新页面...');
+        try { 
+          setTimeout(() => location.reload(), 500); 
+        } catch(_){}
+      }
 
 const __download_end_time = Date.now();
       console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
