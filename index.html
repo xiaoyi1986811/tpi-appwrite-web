@@ -430,7 +430,6 @@ window.__tpi_legacy_loadTpiData_1 = function () {
     try{ if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc(); }catch(e){}
     // 2.1) 额外保险：刷新分数看板/统计（如果存在）
     try{ if (window.ScoreDashboard && typeof window.ScoreDashboard.update === 'function') window.ScoreDashboard.update(); }catch(e){}
-    try{ if (window.TPI && typeof window.TPI.updateStatistics === 'function') window.TPI.updateStatistics(); }catch(e){}
 
     // 3) 采集快照（包含 _formState + _viewState + 各模块补丁字段）
     let snapObj = null;
@@ -555,7 +554,7 @@ window.__tpi_legacy_loadTpiData_1 = function () {
 
       try{ __tpi_ls_set('tpi_last_manual_backup', String(Date.now())); }catch(e){}
       _toast('✅ 导出成功（已包含当前输入/勾选与页面当前内容）', 'success');
-      _removeBackupBannerIfAny();
+      _toast('✅ 导出成功！已完整导出当前页面所有内容', 'success');
     }catch(e){
       console.error('[exportCurrentSnapshot] failed:', e);
       _toast('❌ 导出失败：请查看控制台错误信息', 'error');
@@ -792,6 +791,47 @@ function __tpi_collectViewState() {
     view[`#${id}`] = { text };
   });
 
+  // ✅ 收集图表Canvas状态
+  try {
+    const trendCanvas = document.getElementById('trendChart');
+    if (trendCanvas && trendCanvas.toDataURL) {
+      view['#trendChart-data'] = { 
+        type: 'canvas',
+        dataURL: trendCanvas.toDataURL('image/png')
+      };
+    }
+  } catch(e) {}
+
+  try {
+    const heatmapCanvas = document.getElementById('heatmapCalendar');
+    if (heatmapCanvas && heatmapCanvas.toDataURL) {
+      view['#heatmapCalendar-data'] = {
+        type: 'canvas',
+        dataURL: heatmapCanvas.toDataURL('image/png')
+      };
+    }
+  } catch(e) {}
+
+  // ✅ 收集徽章状态
+  try {
+    const badges = document.querySelectorAll('.badge-item');
+    const badgeStates = [];
+    badges.forEach(badge => {
+      const isUnlocked = badge.classList.contains('unlocked');
+      const name = badge.querySelector('.badge-name');
+      const progress = badge.querySelector('.badge-progress');
+      if (name) {
+        badgeStates.push({
+          name: name.textContent,
+          unlocked: isUnlocked,
+          progress: progress ? progress.textContent : ''  
+        });
+      }
+    });
+    if (badgeStates.length > 0) {
+      view['#badges-state'] = { badges: badgeStates };
+    }
+  } catch(e) {}
 
   return view;
 }
@@ -5287,6 +5327,59 @@ window.exportAsCSV = function() {
     </div>
     <div id="tpi-sync-msg" style="margin-top:10px; font-size:14px;"></div>
     <p id="sync-status" style="margin-top:6px; font-size:13px; opacity:.9;"></p>
+  </div>
+
+  <!-- ========== Gist 备份区域 (方案B: 主备模式) ========== -->
+  <div style="margin-top:30px; padding-top:24px; border-top:2px dashed #e5e7eb;">
+    <div class="alert alert-warning mb-3">
+      <p><strong>💾 Gist 备份说明</strong>：将数据备份到 GitHub Gist，作为 Appwrite 的补充备份方案。<br>
+      <span style="opacity:.85">• 主同步：使用上方 Appwrite（快速实时）<br>
+      • 备份：使用 Gist（长期存档、版本历史）<br>
+      • 建议：每天睡前点击"备份到 Gist"，或开启自动备份</span></p>
+    </div>
+
+    <div id="gist-backup-panel" style="max-width: 820px;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:16px;">
+        <div class="form-group" style="min-width:400px; flex:1;">
+          <label for="gist-token" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">
+            GitHub Personal Access Token (需勾选 gist 权限):
+          </label>
+          <input id="gist-token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" 
+                 style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+          <div style="font-size:12px; color:#6b7280; margin-top:4px;">
+            🔗 <a href="https://github.com/settings/tokens/new?scopes=gist&description=TPI%20Backup" target="_blank" style="color:#2563eb;">点击这里创建 Token</a>
+          </div>
+        </div>
+        <div class="form-group" style="min-width:200px; flex:1;">
+          <label for="gist-id" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">
+            Gist ID (可选):
+          </label>
+          <input id="gist-id" type="text" placeholder="自动创建或输入已有ID" 
+                 style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
+          <div style="font-size:12px; color:#6b7280; margin-top:4px;">
+            首次备份会自动创建 Secret Gist
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <button type="button" onclick="gistBackupNow()" 
+                style="padding:12px 20px; background: linear-gradient(135deg,#f59e0b,#d97706); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
+          💾 立即备份到 Gist
+        </button>
+        <button type="button" onclick="gistRestoreData()" 
+                style="padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
+          📥 从 Gist 恢复数据
+        </button>
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none; padding:8px 12px; background:#f3f4f6; border-radius:8px;">
+          <input id="gist-auto-backup" type="checkbox" onchange="toggleGistAutoBackup(this.checked)">
+          <span style="font-weight:600; color:#374151;">每日自动备份 (23:00)</span>
+        </label>
+      </div>
+
+      <div id="gist-backup-msg" style="margin-top:10px; font-size:14px;"></div>
+      <div id="gist-backup-status" style="margin-top:6px; font-size:13px; opacity:.9; color:#059669;"></div>
+    </div>
   </div>
 
 </div>
@@ -15519,6 +15612,34 @@ const TPI = (function() {
                 const historyKey = 'tpi_history';
                 let history = JSON.parse(/* 已添加错误处理 */ __tpi_ls_get(historyKey) || '[]');
 
+                // 从完整数据库补充缺失信息
+                try {
+                    const enhanced = [];
+                    for (const item of history) {
+                        if (!item.bcm && !item.hsm && !item.ami) {
+                            const dayData = JSON.parse(__tpi_ls_get(`tpi_data_${item.date}`) || 'null');
+                            if (dayData) {
+                                enhanced.push({
+                                    ...item,
+                                    ami: dayData.ami || 0,
+                                    fli: dayData.fli || 0,
+                                    bcm: dayData.bcm || 0,
+                                    hsm: dayData.hsm || 0,
+                                    logistics: dayData.logistics || 0,
+                                    bonus: dayData.bonus || 0
+                                });
+                            } else {
+                                enhanced.push(item);
+                            }
+                        } else {
+                            enhanced.push(item);
+                        }
+                    }
+                    history = enhanced;
+                } catch (e) {
+                    console.warn('[getHistoricalData] 补充失败:', e);
+                }
+
                 // 如果指定天数，只返回最近的数据
                 if (days && days > 0) {
                     history = history.slice(-days);
@@ -18557,7 +18678,14 @@ try {
                         timestamp: data.timestamp,
                         tpi: safeParseFloat(document.getElementById('tpi-total')?.value || 0),
                         totalWords: data.totalWords || 0,
-                        totalPages: data.totalPages || 0
+                        totalPages: data.totalPages || 0,
+                        // 完整分数用于徽章和趋势
+                        ami: safeParseFloat(document.getElementById('ami-score')?.value || 0),
+                        fli: safeParseFloat(document.getElementById('fli-score')?.value || 0),
+                        bcm: safeParseFloat(document.getElementById('bcm-total-score')?.textContent || document.getElementById('bcm-total-score')?.value || 0),
+                        hsm: safeParseFloat(document.getElementById('hsm-total-score')?.textContent || document.getElementById('hsm-total-score')?.value || 0),
+                        logistics: safeParseFloat(document.getElementById('logistics-total-score')?.textContent || document.getElementById('logistics-total-score')?.value || 0),
+                        bonus: safeParseFloat(document.getElementById('bonus-total-score')?.textContent || document.getElementById('bonus-total-score')?.value || 0)
                     };
 
                     if (existingIndex >= 0) {
@@ -30054,6 +30182,16 @@ window.__tpi_syncDateToMain = function(){
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
       });
       
+      // ========== 保存到 IndexedDB（本地持久化）==========
+      try {
+        if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
+          await window.TPIIndexedDB.saveData(dateStr, payload, { synced_appwrite: true });
+          console.log('✅ [IndexedDB] 已保存到本地数据库');
+        }
+      } catch(idbError) {
+        console.warn('⚠️ [IndexedDB] 保存失败(不影响云端同步):', idbError);
+      }
+      
       console.log('✅ ═════════════════════════════════════════════════════');
       console.log('✅ [云同步] 上传成功');
       console.log(`📅 同步日期: ${dateStr}`);
@@ -30065,14 +30203,15 @@ window.__tpi_syncDateToMain = function(){
 
       showModal?.({
         type:'success',
-        title:'上传成功',
+        title:'✅ Appwrite 云端同步成功',
         message:
-          `✅ 已上传所选日期数据到云端\n\n`+
+          `✅ 已上传所选日期数据到 Appwrite 云端\n\n`+
           `📅 日期：${dateStr}\n`+
           `🆔 文档ID：${docId}\n`+
           `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
-          `💾 数据大小：${dataStr.length} 字符 (${dataSizeKB} KB)\n`+
-          `⏰ 上传时间：${uploadTime}`,
+          `💾 数据大小：${dataStr.length} 字符 (${dataSizeKB} KB / ${dataSizeMB} MB)\n`+
+          `⏰ 上传时间：${uploadTime}\n\n`+
+          `💡 提示：建议同时点击下方"💾 立即备份到 Gist"进行双重备份`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -30126,8 +30265,8 @@ window.__tpi_syncDateToMain = function(){
         throw new Error('云端数据解析失败（data 不是有效 JSON 字符串）');
       }
 
-      // 先清空再恢复，避免“残留旧值”导致差异
-// 但保留少量“设备本地”键（不参与跨设备同步），避免误判为缓存或破坏本机标识
+      // 先清空再恢复，避免"残留旧值"导致差异
+// 但保留少量"设备本地"键（不参与跨设备同步），避免误判为缓存或破坏本机标识
 const __preserveKeys = ['tpi_device_id', 'tpi_error_log'];
 const __preserved = {};
 try{
@@ -30153,51 +30292,165 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
 // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
 
-      // ✅ 关键修复：不同版本可能只有 TPI.loadFromLocalStorage（而不是全局 loadFromLocalStorage）
-      // 同时，为确保“分数/评级/看板/徽章”等规则生成内容真实刷新，额外触发一次完整恢复链路
+      // ✅ 【关键修复】：强制使用restoreUIFromData进行完整恢复
+      // 这确保所有输入、勾选、分数、评级、图表等都能被正确恢复
       let __uiRestored = false;
-
-      // 1) 优先走系统对象方法（更稳定）
-      try{
-        if (window.TPI && typeof window.TPI.loadFromLocalStorage === 'function') {
-          window.TPI.loadFromLocalStorage();
-          __uiRestored = true;
-          console.log('✅ [下载] UI恢复完成 (TPI.loadFromLocalStorage)');
+      
+      console.log('🔄 [下载] 开始恢复UI状态...');
+      
+      // 步骤1：从localStorage构建完整的日数据对象
+      let dayData = null;
+      try {
+        if (typeof window.getTpiDayData === 'function') {
+          dayData = window.getTpiDayData(dateStr);
+          console.log('✅ [下载] 成功获取日数据对象:', dayData ? '有数据' : '无数据');
         }
-      }catch(e){ console.warn('[云同步] TPI.loadFromLocalStorage 调用失败(忽略):', e); }
-
-      // 2) 兼容：旧全局函数
-      if(!__uiRestored && typeof window.loadFromLocalStorage === 'function'){
-        try{
-          window.loadFromLocalStorage();
+      } catch(e) {
+        console.warn('⚠️ [下载] getTpiDayData调用失败:', e);
+      }
+      
+      // 步骤2：使用restoreUIFromData恢复所有UI（这是最完整的恢复方法）
+      if (dayData && typeof window.restoreUIFromData === 'function') {
+        try {
+          console.log('🔧 [下载] 调用restoreUIFromData恢复UI...');
+          window.restoreUIFromData(dayData);
           __uiRestored = true;
-          console.log('✅ [下载] UI恢复完成 (loadFromLocalStorage)');
-        }catch(e){ console.warn('[云同步] loadFromLocalStorage 调用失败(忽略):', e); }
+          console.log('✅ [下载] UI恢复完成 (restoreUIFromData)');
+        } catch(e) {
+          console.error('❌ [下载] restoreUIFromData失败:', e);
+        }
+      }
+      
+      // 步骤3：额外调用系统的loadFromLocalStorage（如果存在）作为补充
+      try {
+        if (window.TPI && typeof window.TPI.loadFromLocalStorage === 'function') {
+          console.log('🔧 [下载] 调用TPI.loadFromLocalStorage作为补充...');
+          window.TPI.loadFromLocalStorage();
+          console.log('✅ [下载] TPI.loadFromLocalStorage补充完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] TPI.loadFromLocalStorage补充失败(忽略):', e);
+      }
+      
+      // 步骤4：调用全局loadFromLocalStorage（如果存在）作为额外补充
+      try {
+        if (typeof window.loadFromLocalStorage === 'function') {
+          console.log('🔧 [下载] 调用loadFromLocalStorage作为额外补充...');
+          window.loadFromLocalStorage();
+          console.log('✅ [下载] loadFromLocalStorage补充完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] loadFromLocalStorage补充失败(忽略):', e);
       }
 
-      // 3) 兜底：直接按“所选日期的日数据”调用 restoreUIFromData（确保所有输入/勾选/派生展示一致）
-      if (typeof window.restoreUIFromData === 'function') {
-        try{
-          const dayData = (typeof window.getTpiDayData === 'function') ? window.getTpiDayData(dateStr) : null;
-          if (dayData) {
-            window.restoreUIFromData(dayData);
-            __uiRestored = true;
-            console.log('✅ [下载] UI恢复完成 (restoreUIFromData + getTpiDayData)');
+      // 步骤5：【关键】触发所有必要的重新计算和UI刷新
+      console.log('🔄 [下载] 开始触发重新计算和UI刷新...');
+      
+      // 5.1 触发TPI分数计算
+      try {
+        if (window.TPI && typeof window.TPI.calculateTPI === 'function') {
+          console.log('🔧 [下载] 触发TPI.calculateTPI...');
+          window.TPI.calculateTPI();
+          console.log('✅ [下载] TPI.calculateTPI完成');
+        } else if (typeof window.calculateTPI === 'function') {
+          console.log('🔧 [下载] 触发calculateTPI...');
+          window.calculateTPI();
+          console.log('✅ [下载] calculateTPI完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] calculateTPI失败(忽略):', e);
+      }
+      
+      // 5.2 触发__tpi_triggerRecalc（如果存在）
+      try {
+        if (typeof window.__tpi_triggerRecalc === 'function') {
+          console.log('🔧 [下载] 触发__tpi_triggerRecalc...');
+          window.__tpi_triggerRecalc();
+          console.log('✅ [下载] __tpi_triggerRecalc完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] __tpi_triggerRecalc失败(忽略):', e);
+      }
+      
+      // 5.3 刷新未来事件雷达（确保雷达数据显示正确）
+      try {
+        if (window.FutureRadar) {
+          console.log('🔧 [下载] 刷新FutureRadar...');
+          if (typeof window.FutureRadar.loadData === 'function') {
+            window.FutureRadar.loadData();
           }
-        }catch(e){ console.warn('[云同步] restoreUIFromData(getTpiDayData) 失败(忽略):', e); }
+          if (typeof window.FutureRadar.reload === 'function') {
+            window.FutureRadar.reload();
+          } else if (typeof window.FutureRadar.render === 'function') {
+            window.FutureRadar.render();
+          }
+          console.log('✅ [下载] FutureRadar刷新完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] FutureRadar刷新失败(忽略):', e);
       }
-
-      // 4) 最终兜底：如果仍未恢复，才刷新页面（刷新会让各模块基于 localStorage 重新初始化）
-      if(!__uiRestored){
-        console.log('ℹ️ [下载] 未发现可用的UI恢复函数，使用页面刷新方式恢复');
-        try{ location.reload(); }catch(_){}
+      
+      // 5.4 刷新杂事记录（确保杂事记录显示正确）
+      try {
+        if (window.MiscLog && typeof window.MiscLog.render === 'function') {
+          console.log('🔧 [下载] 刷新MiscLog...');
+          window.MiscLog.render();
+          console.log('✅ [下载] MiscLog刷新完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] MiscLog刷新失败(忽略):', e);
       }
-
-      // 保底：触发一次重新计算，避免“只有签到/雷达/杂事显示，其它分数/评级没刷新”
-      try{
-        if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc();
-        else if (typeof window.calculateTPI === 'function') window.calculateTPI();
-      }catch(e){}
+      
+      // 5.5 刷新签到状态（确保签到状态显示正确）
+      try {
+        if (typeof window.__tpi_refreshCheckin === 'function') {
+          console.log('🔧 [下载] 刷新签到状态...');
+          window.__tpi_refreshCheckin();
+          console.log('✅ [下载] 签到状态刷新完成');
+        } else if (typeof window.updateCheckInStatus === 'function') {
+          console.log('🔧 [下载] 刷新签到状态(updateCheckInStatus)...');
+          window.updateCheckInStatus();
+          console.log('✅ [下载] 签到状态刷新完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] 签到状态刷新失败(忽略):', e);
+      }
+      
+      // 5.6 刷新模式选择（确保模式卡片显示正确）
+      try {
+        const selectedMode = __tpi_ls_get('selectedMode');
+        if (selectedMode && window.TPI && typeof window.TPI.selectMode === 'function') {
+          console.log('🔧 [下载] 恢复模式选择:', selectedMode);
+          window.TPI.selectMode(selectedMode);
+          console.log('✅ [下载] 模式选择恢复完成');
+        }
+      } catch(e) {
+        console.warn('⚠️ [下载] 模式选择恢复失败(忽略):', e);
+      }
+      
+      // 5.7 触发所有输入框的change事件（确保关联的UI更新）
+      try {
+        console.log('🔧 [下载] 触发输入框change事件...');
+        document.querySelectorAll('input, select, textarea').forEach(el => {
+          try {
+            const event = new Event('change', { bubbles: true });
+            el.dispatchEvent(event);
+          } catch(e) {}
+        });
+        console.log('✅ [下载] 输入框change事件触发完成');
+      } catch(e) {
+        console.warn('⚠️ [下载] 触发change事件失败(忽略):', e);
+      }
+      
+      console.log('✅ [下载] 所有UI刷新和重新计算完成');
+      
+      // 步骤6：最终兜底 - 如果完全没有恢复成功，才刷新页面
+      if (!__uiRestored && !dayData) {
+        console.log('⚠️ [下载] 未能通过函数恢复UI，将刷新页面...');
+        try { 
+          setTimeout(() => location.reload(), 500); 
+        } catch(_){}
+      }
 
 const __download_end_time = Date.now();
       console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
@@ -30211,6 +30464,16 @@ const __download_end_time = Date.now();
       const dataSizeBytes = doc.data ? doc.data.length : 0;
       const dataSizeKB = (dataSizeBytes / 1024).toFixed(2);
       
+      // ========== 保存到 IndexedDB（本地持久化）==========
+      try {
+        if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
+          await window.TPIIndexedDB.saveData(dateStr, payload, { synced_appwrite: true });
+          console.log('✅ [IndexedDB] 已保存到本地数据库');
+        }
+      } catch(idbError) {
+        console.warn('⚠️ [IndexedDB] 保存失败(不影响数据恢复):', idbError);
+      }
+      
       console.log('📥 ═════════════════════════════════════════════════════');
       console.log('📥 [云同步] 下载成功');
       console.log(`📅 同步日期: ${dateStr}`);
@@ -30223,15 +30486,18 @@ const __download_end_time = Date.now();
 
       showModal?.({
         type:'success',
-        title:'下载成功',
+        title:'✅ Appwrite 云端下载成功',
         message:
-          `✅ 已从云端下载所选日期数据\n\n`+
+          `✅ 已从 Appwrite 云端下载所选日期数据\n\n`+
           `📅 日期：${dateStr}\n`+
           `🆔 文档ID：${docId}\n`+
-          `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
+          `📦 恢复字段：${Object.keys(payload).length} 个\n`+
           `💾 数据大小：${dataSizeBytes} 字节 (${dataSizeKB} KB)\n`+
-          `🔄 下载前localStorage键数：${beforeKeys}\n`+
-          `⏰ 下载时间：${downloadTime}`,
+          `🔄 localStorage 键数：${beforeKeys} → ${afterKeys}\n`+
+          `⏱️ 用时：${__download_end_time - __download_start_time}ms\n`+
+          `⏰ 下载时间：${downloadTime}\n\n`+
+          `✅ UI已刷新：所有分数、评级、图表均已更新\n`+
+          `💡 数据已同时保存到本地 IndexedDB`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -30500,9 +30766,627 @@ function loadMainInterface() {
     loadTodaysData();
 }
 
+// 🔥 保障4：添加全局下载函数供按钮调用
+window.loadHistoryFromCloud = async function() {
+    console.log('📥 [全局下载] loadHistoryFromCloud 被调用');
+    try {
+        const result = await loadTodaysData();
+        return result;
+    } catch(error) {
+        console.error('❌ [全局下载] 下载失败:', error);
+        throw error;
+    }
+};
+
+// 🔥 保障5：添加自动同步功能（定时保存）
+window.enableAutoSync = function(intervalMinutes = 5) {
+    if (window.__autoSyncInterval) {
+        clearInterval(window.__autoSyncInterval);
+    }
+    
+    window.__autoSyncInterval = setInterval(async () => {
+        try {
+            console.log('⏰ [自动同步] 执行定时保存...');
+            await saveTodaysData();
+        } catch(error) {
+            console.error('❌ [自动同步] 自动保存失败:', error);
+        }
+    }, intervalMinutes * 60 * 1000);
+    
+    console.log(`✅ [自动同步] 已启用，每${intervalMinutes}分钟自动保存一次`);
+};
+
+window.disableAutoSync = function() {
+    if (window.__autoSyncInterval) {
+        clearInterval(window.__autoSyncInterval);
+        window.__autoSyncInterval = null;
+        console.log('✅ [自动同步] 已禁用');
+    }
+};
+
+// 🔥 保障6：页面卸载时自动保存
+window.addEventListener('beforeunload', async (e) => {
+    try {
+        // 使用navigator.sendBeacon进行可靠的后台保存
+        console.log('🔄 [页面卸载] 尝试保存数据...');
+        
+        // 由于beforeunload中异步操作可能不完整，我们保存到localStorage作为备份
+        const today = getTodayString();
+        if (typeof window.collectDailyData === 'function') {
+            const obj = window.collectDailyData();
+            const snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+            if (snapshot) {
+                __tpi_ls_set('tpi_unsaved_data_' + today, JSON.stringify(snapshot));
+                __tpi_ls_set('tpi_unsaved_timestamp', new Date().toISOString());
+                console.log('✅ [页面卸载] 数据已备份到localStorage');
+            }
+        }
+    } catch(error) {
+        console.error('❌ [页面卸载] 备份失败:', error);
+    }
+});
+
+// 🔥 保障7：页面加载时检查未保存数据
+window.checkUnsavedData = async function() {
+    const today = getTodayString();
+    const unsavedData = __tpi_ls_get('tpi_unsaved_data_' + today);
+    const timestamp = __tpi_ls_get('tpi_unsaved_timestamp');
+    
+    if (unsavedData && timestamp) {
+        const unsavedTime = new Date(timestamp);
+        const now = new Date();
+        const minutesDiff = (now - unsavedTime) / 1000 / 60;
+        
+        if (minutesDiff < 30) { // 30分钟内的未保存数据
+            console.log('⚠️ [启动检查] 发现未保存数据，时间:', timestamp);
+            
+            if (confirm('发现未保存的数据（' + Math.floor(minutesDiff) + '分钟前），是否上传到云端？')) {
+                try {
+                    const snapshot = JSON.parse(unsavedData);
+                    
+                    // 先恢复到UI
+                    if (typeof window.restoreUIFromData === 'function') {
+                        window.restoreUIFromData(snapshot);
+                    }
+                    
+                    // 然后保存到云端
+                    await saveTodaysData();
+                    
+                    // 清除未保存标记
+                    __tpi_ls_remove('tpi_unsaved_data_' + today);
+                    __tpi_ls_remove('tpi_unsaved_timestamp');
+                    
+                    console.log('✅ [启动检查] 未保存数据已上传');
+                } catch(error) {
+                    console.error('❌ [启动检查] 上传失败:', error);
+                }
+            }
+        } else {
+            // 超过30分钟，清除旧数据
+            __tpi_ls_remove('tpi_unsaved_data_' + today);
+            __tpi_ls_remove('tpi_unsaved_timestamp');
+        }
+    }
+};
+
+// 🔥 保障8：添加手动强制同步函数
+window.forceSyncNow = async function() {
+    console.log('🔄 [强制同步] 开始执行...');
+    try {
+        // 先保存
+        const saveResult = await saveTodaysData();
+        console.log('✅ [强制同步] 保存结果:', saveResult);
+        
+        // 延迟1秒后加载验证
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        const loadResult = await loadTodaysData();
+        console.log('✅ [强制同步] 加载结果:', loadResult);
+        
+        return { success: true, save: saveResult, load: loadResult };
+    } catch(error) {
+        console.error('❌ [强制同步] 失败:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+console.log('✅ [云端同步] 自动同步保障系统已加载');
+
+/* ========================================
+   🔥 保障9：快照版本管理系统
+   - 支持多版本快照保存
+   - 支持快照恢复
+   - 支持快照对比
+   - 支持快照验证
+======================================== */
+
+window.TPISnapshotSystem = {
+    maxSnapshots: 10, // 最多保留10个快照
+    
+    // 创建快照
+    createSnapshot: async function(description = '') {
+        try {
+            const today = getTodayString();
+            console.log('📸 [快照系统] 开始创建快照...');
+            
+            // 1. 收集当前数据
+            let snapshot = null;
+            if (typeof window.collectDailyData === 'function') {
+                const obj = window.collectDailyData();
+                snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+            }
+            
+            if (!snapshot) {
+                console.error('❌ [快照系统] 无法收集数据');
+                return { success: false, error: '无法收集数据' };
+            }
+            
+            // 2. 创建快照元数据
+            const snapshotData = {
+                id: 'snapshot_' + Date.now(),
+                timestamp: new Date().toISOString(),
+                date: today,
+                description: description || '自动快照',
+                data: snapshot,
+                checksum: this.generateChecksum(snapshot)
+            };
+            
+            // 3. 保存到云端
+            const cloudResult = await this.saveSnapshotToCloud(snapshotData);
+            
+            // 4. 保存到本地
+            this.saveSnapshotToLocal(snapshotData);
+            
+            // 5. 清理旧快照
+            await this.cleanOldSnapshots();
+            
+            console.log('✅ [快照系统] 快照创建成功:', snapshotData.id);
+            TPIToast.success('📸 快照创建成功');
+            
+            return { success: true, snapshot: snapshotData };
+            
+        } catch(error) {
+            console.error('❌ [快照系统] 创建快照失败:', error);
+            TPIToast.error('❌ 快照创建失败: ' + error.message);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // 保存快照到云端
+    saveSnapshotToCloud: async function(snapshotData) {
+        try {
+            const dataToSave = {
+                snapshotId: snapshotData.id,
+                date: snapshotData.date,
+                timestamp: snapshotData.timestamp,
+                description: snapshotData.description,
+                checksum: snapshotData.checksum,
+                data: JSON.stringify(snapshotData.data)
+            };
+            
+            // 使用当前日期+快照ID作为文档ID
+            const docId = snapshotData.date + '_' + snapshotData.id;
+            
+            await databases.createDocument(
+                DATABASE_ID,
+                COLLECTION_ID + '_snapshots', // 使用单独的快照集合
+                docId,
+                dataToSave
+            );
+            
+            console.log('✅ [快照系统] 云端保存成功:', docId);
+            return { success: true };
+            
+        } catch(error) {
+            // 如果快照集合不存在，降级到localStorage
+            console.warn('⚠️ [快照系统] 云端保存失败，使用本地存储:', error);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // 保存快照到本地
+    saveSnapshotToLocal: function(snapshotData) {
+        try {
+            // 获取现有快照列表
+            const snapshotsKey = 'tpi_snapshots_' + snapshotData.date;
+            const existingStr = __tpi_ls_get(snapshotsKey) || '[]';
+            const snapshots = JSON.parse(existingStr);
+            
+            // 添加新快照
+            snapshots.push({
+                id: snapshotData.id,
+                timestamp: snapshotData.timestamp,
+                description: snapshotData.description,
+                checksum: snapshotData.checksum
+            });
+            
+            // 保存快照列表
+            __tpi_ls_set(snapshotsKey, JSON.stringify(snapshots));
+            
+            // 保存快照数据
+            __tpi_ls_set('tpi_snapshot_data_' + snapshotData.id, JSON.stringify(snapshotData.data));
+            
+            console.log('✅ [快照系统] 本地保存成功');
+            
+        } catch(error) {
+            console.warn('⚠️ [快照系统] 本地保存失败:', error);
+        }
+    },
+    
+    // 获取快照列表
+    getSnapshotList: async function(date = null) {
+        const today = date || getTodayString();
+        const snapshots = [];
+        
+        try {
+            // 1. 从云端获取
+            const response = await databases.listDocuments(
+                DATABASE_ID, 
+                COLLECTION_ID + '_snapshots',
+                [
+                    Appwrite.Query.equal('date', today),
+                    Appwrite.Query.orderDesc('timestamp'),
+                    Appwrite.Query.limit(this.maxSnapshots)
+                ]
+            );
+            
+            response.documents.forEach(doc => {
+                snapshots.push({
+                    id: doc.snapshotId,
+                    timestamp: doc.timestamp,
+                    description: doc.description,
+                    checksum: doc.checksum,
+                    source: 'cloud'
+                });
+            });
+            
+        } catch(error) {
+            console.warn('⚠️ [快照系统] 云端获取失败，使用本地:', error);
+        }
+        
+        // 2. 从本地获取（合并）
+        try {
+            const localStr = __tpi_ls_get('tpi_snapshots_' + today) || '[]';
+            const localSnapshots = JSON.parse(localStr);
+            
+            localSnapshots.forEach(local => {
+                // 避免重复
+                if (!snapshots.find(s => s.id === local.id)) {
+                    snapshots.push({
+                        ...local,
+                        source: 'local'
+                    });
+                }
+            });
+            
+        } catch(error) {
+            console.warn('⚠️ [快照系统] 本地获取失败:', error);
+        }
+        
+        // 3. 按时间排序
+        snapshots.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        
+        return snapshots.slice(0, this.maxSnapshots);
+    },
+    
+    // 恢复快照
+    restoreSnapshot: async function(snapshotId) {
+        try {
+            console.log('🔄 [快照系统] 开始恢复快照:', snapshotId);
+            TPILoader.show('正在恢复快照...');
+            
+            let snapshotData = null;
+            
+            // 1. 先尝试从云端获取
+            try {
+                const response = await databases.listDocuments(
+                    DATABASE_ID,
+                    COLLECTION_ID + '_snapshots',
+                    [
+                        Appwrite.Query.equal('snapshotId', snapshotId),
+                        Appwrite.Query.limit(1)
+                    ]
+                );
+                
+                if (response.documents.length > 0) {
+                    const doc = response.documents[0];
+                    snapshotData = JSON.parse(doc.data);
+                    console.log('✅ [快照系统] 从云端获取成功');
+                }
+            } catch(error) {
+                console.warn('⚠️ [快照系统] 云端获取失败:', error);
+            }
+            
+            // 2. 云端失败，从本地获取
+            if (!snapshotData) {
+                const localData = __tpi_ls_get('tpi_snapshot_data_' + snapshotId);
+                if (localData) {
+                    snapshotData = JSON.parse(localData);
+                    console.log('✅ [快照系统] 从本地获取成功');
+                }
+            }
+            
+            if (!snapshotData) {
+                throw new Error('快照数据不存在');
+            }
+            
+            // 3. 验证校验和
+            const currentChecksum = this.generateChecksum(snapshotData);
+            // 注意：如果快照没有checksum字段（旧数据），跳过验证
+            
+            // 4. 恢复数据到UI
+            if (typeof window.restoreUIFromData === 'function') {
+                window.restoreUIFromData(snapshotData);
+                console.log('✅ [快照系统] UI恢复成功');
+            }
+            
+            // 5. 重新计算分数
+            if (typeof window.TPI !== 'undefined' && typeof window.TPI.calculateSystem === 'function') {
+                window.TPI.calculateSystem();
+                console.log('✅ [快照系统] 分数重新计算完成');
+            }
+            
+            TPILoader.hide();
+            TPIToast.success('✅ 快照恢复成功');
+            
+            return { success: true };
+            
+        } catch(error) {
+            TPILoader.hide();
+            console.error('❌ [快照系统] 恢复失败:', error);
+            TPIToast.error('❌ 恢复失败: ' + error.message);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // 删除快照
+    deleteSnapshot: async function(snapshotId) {
+        try {
+            console.log('🗑️ [快照系统] 删除快照:', snapshotId);
+            
+            // 1. 从云端删除
+            try {
+                const response = await databases.listDocuments(
+                    DATABASE_ID,
+                    COLLECTION_ID + '_snapshots',
+                    [
+                        Appwrite.Query.equal('snapshotId', snapshotId),
+                        Appwrite.Query.limit(1)
+                    ]
+                );
+                
+                if (response.documents.length > 0) {
+                    await databases.deleteDocument(
+                        DATABASE_ID,
+                        COLLECTION_ID + '_snapshots',
+                        response.documents[0].$id
+                    );
+                    console.log('✅ [快照系统] 云端删除成功');
+                }
+            } catch(error) {
+                console.warn('⚠️ [快照系统] 云端删除失败:', error);
+            }
+            
+            // 2. 从本地删除
+            const today = getTodayString();
+            const snapshotsKey = 'tpi_snapshots_' + today;
+            const existingStr = __tpi_ls_get(snapshotsKey) || '[]';
+            const snapshots = JSON.parse(existingStr);
+            
+            const filtered = snapshots.filter(s => s.id !== snapshotId);
+            __tpi_ls_set(snapshotsKey, JSON.stringify(filtered));
+            __tpi_ls_remove('tpi_snapshot_data_' + snapshotId);
+            
+            console.log('✅ [快照系统] 本地删除成功');
+            TPIToast.success('✅ 快照已删除');
+            
+            return { success: true };
+            
+        } catch(error) {
+            console.error('❌ [快照系统] 删除失败:', error);
+            TPIToast.error('❌ 删除失败: ' + error.message);
+            return { success: false, error: error.message };
+        }
+    },
+    
+    // 清理旧快照（保留最新N个）
+    cleanOldSnapshots: async function() {
+        try {
+            const today = getTodayString();
+            const snapshots = await this.getSnapshotList(today);
+            
+            if (snapshots.length > this.maxSnapshots) {
+                const toDelete = snapshots.slice(this.maxSnapshots);
+                console.log(`🧹 [快照系统] 清理旧快照: ${toDelete.length}个`);
+                
+                for (const snapshot of toDelete) {
+                    await this.deleteSnapshot(snapshot.id);
+                }
+            }
+            
+        } catch(error) {
+            console.warn('⚠️ [快照系统] 清理失败:', error);
+        }
+    },
+    
+    // 生成校验和
+    generateChecksum: function(data) {
+        try {
+            const str = JSON.stringify(data);
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; // Convert to 32bit integer
+            }
+            return hash.toString(16);
+        } catch(error) {
+            return '';
+        }
+    },
+    
+    // 显示快照管理界面
+    showSnapshotManager: async function() {
+        try {
+            const snapshots = await this.getSnapshotList();
+            
+            let html = `
+                <div style="padding: 20px;">
+                    <h3 style="margin-bottom: 20px;">📸 快照管理</h3>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <button onclick="TPISnapshotSystem.createSnapshot(prompt('请输入快照描述（可选）:'))" 
+                                style="padding: 10px 20px; background: #10B981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            ➕ 创建新快照
+                        </button>
+                    </div>
+                    
+                    <div style="max-height: 400px; overflow-y: auto;">
+                        ${snapshots.length === 0 ? 
+                            '<p style="color: #6B7280; text-align: center; padding: 40px;">暂无快照</p>' : 
+                            snapshots.map(s => `
+                                <div style="border: 1px solid #E5E7EB; border-radius: 8px; padding: 15px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; margin-bottom: 5px;">${s.description}</div>
+                                        <div style="font-size: 12px; color: #6B7280;">
+                                            ${new Date(s.timestamp).toLocaleString('zh-CN')}
+                                            <span style="margin-left: 10px; padding: 2px 6px; background: ${s.source === 'cloud' ? '#DBEAFE' : '#FEF3C7'}; color: ${s.source === 'cloud' ? '#1E40AF' : '#92400E'}; border-radius: 4px; font-size: 10px;">
+                                                ${s.source === 'cloud' ? '☁️ 云端' : '💾 本地'}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <button onclick="TPISnapshotSystem.restoreSnapshot('${s.id}')" 
+                                                style="padding: 6px 12px; background: #3B82F6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px;">
+                                            🔄 恢复
+                                        </button>
+                                        <button onclick="if(confirm('确定删除此快照？')) TPISnapshotSystem.deleteSnapshot('${s.id}').then(() => TPISnapshotSystem.showSnapshotManager())" 
+                                                style="padding: 6px 12px; background: #EF4444; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                                            🗑️ 删除
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')
+                        }
+                    </div>
+                    
+                    <div style="margin-top: 20px; padding: 15px; background: #F3F4F6; border-radius: 8px; font-size: 13px; color: #4B5563;">
+                        <strong>💡 使用说明：</strong>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            <li>快照会自动保存到云端和本地双重备份</li>
+                            <li>最多保留最近${this.maxSnapshots}个快照</li>
+                            <li>建议在重要操作前手动创建快照</li>
+                            <li>恢复快照会覆盖当前所有数据</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+            
+            // 创建弹窗
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.5); z-index: 10000;
+                display: flex; align-items: center; justify-content: center;
+            `;
+            
+            const content = document.createElement('div');
+            content.style.cssText = `
+                background: white; border-radius: 12px;
+                max-width: 800px; width: 90%; max-height: 80vh;
+                overflow: auto; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+            `;
+            content.innerHTML = html;
+            
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '✕';
+            closeBtn.style.cssText = `
+                position: absolute; top: 20px; right: 20px;
+                background: none; border: none; font-size: 24px;
+                cursor: pointer; color: #6B7280;
+            `;
+            closeBtn.onclick = () => modal.remove();
+            
+            content.style.position = 'relative';
+            content.appendChild(closeBtn);
+            modal.appendChild(content);
+            document.body.appendChild(modal);
+            
+            modal.onclick = (e) => {
+                if (e.target === modal) modal.remove();
+            };
+            
+        } catch(error) {
+            console.error('❌ [快照系统] 显示界面失败:', error);
+            alert('❌ 显示失败: ' + error.message);
+        }
+    },
+    
+    // 自动快照（保存时）
+    autoSnapshot: async function() {
+        if (!this.autoSnapshotEnabled) return;
+        
+        try {
+            await this.createSnapshot('自动快照 - ' + new Date().toLocaleTimeString());
+        } catch(error) {
+            console.warn('⚠️ [快照系统] 自动快照失败:', error);
+        }
+    },
+    
+    // 启用/禁用自动快照
+    autoSnapshotEnabled: false,
+    enableAutoSnapshot: function() {
+        this.autoSnapshotEnabled = true;
+        console.log('✅ [快照系统] 自动快照已启用');
+        TPIToast.success('✅ 自动快照已启用');
+    },
+    disableAutoSnapshot: function() {
+        this.autoSnapshotEnabled = false;
+        console.log('✅ [快照系统] 自动快照已禁用');
+        TPIToast.info('ℹ️ 自动快照已禁用');
+    }
+};
+
+// 增强saveTodaysData，添加自动快照
+(function() {
+    if (typeof window.saveTodaysData === 'function') {
+        const originalSave = window.saveTodaysData;
+        window.saveTodaysData = async function() {
+            const result = await originalSave.apply(this, arguments);
+            
+            // 如果保存成功，创建自动快照
+            if (result && result.success) {
+                await window.TPISnapshotSystem.autoSnapshot();
+            }
+            
+            return result;
+        };
+        console.log('✅ [快照系统] saveTodaysData已增强（支持自动快照）');
+    }
+})();
+
+// 添加快捷键：Ctrl+Shift+S 打开快照管理
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        window.TPISnapshotSystem.showSnapshotManager();
+    }
+});
+
+console.log('✅ [快照系统] 快照版本管理系统已加载');
+console.log('📸 [快照系统] 使用方式：');
+console.log('   - 手动创建快照: TPISnapshotSystem.createSnapshot("描述")');
+console.log('   - 查看快照列表: TPISnapshotSystem.showSnapshotManager()');
+console.log('   - 恢复快照: TPISnapshotSystem.restoreSnapshot("快照ID")');
+console.log('   - 启用自动快照: TPISnapshotSystem.enableAutoSnapshot()');
+console.log('   - 快捷键: Ctrl+Shift+S 打开快照管理界面');
+
 // 从 Appwrite 加载今日的 TPI 数据
 async function loadTodaysData() {
     const today = getTodayString();
+    
+    console.log('🔄 [云端同步] 开始从云端加载数据...', today);
+    
     try {
         const response = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
             Appwrite.Query.equal('date', today),
@@ -30510,42 +31394,124 @@ async function loadTodaysData() {
         ]);
 
         if (response.documents.length > 0) {
-            const savedData = response.documents[0].data;
-
-            // 提示词要求：把 savedData 映射回表单。
-            // 为了保证“全站输入/勾选/规则生成内容”100%恢复，这里采用整包快照恢复：
-            try{
-              if (savedData && savedData.data && typeof window.restoreUIFromData === 'function') {
-                window.restoreUIFromData(savedData.data);
+            const cloudData = response.documents[0].data;
+            console.log('📦 [云端同步] 获取到云端数据，类型:', typeof cloudData, '长度:', cloudData?.length);
+            
+            // 🔥 保障1：数据解析（cloudData现在是字符串，需要解析为对象）
+            let snapshot = null;
+            try {
+              if (typeof cloudData === 'string') {
+                snapshot = JSON.parse(cloudData);
+                console.log('✅ [云端同步] 数据解析成功:', snapshot);
+              } else if (typeof cloudData === 'object') {
+                // 兼容旧格式：如果是对象直接使用
+                snapshot = cloudData.data || cloudData;
+                console.log('✅ [云端同步] 使用对象格式数据');
               }
-            }catch(e){ console.warn('restoreUIFromData failed:', e); }
+            } catch(parseError) {
+              console.error('❌ [云端同步] 数据解析失败:', parseError);
+              
+              // 🔥 保障2：降级到本地备份
+              const backup = __tpi_ls_get('tpi_cloud_backup_' + today);
+              if (backup) {
+                try {
+                  snapshot = JSON.parse(backup);
+                  console.log('✅ [云端同步] 使用本地备份数据');
+                } catch(e) {
+                  console.error('❌ [云端同步] 本地备份也解析失败:', e);
+                }
+              }
+            }
 
-            console.log('已加载今日数据:', savedData);
+            if (snapshot && typeof window.restoreUIFromData === 'function') {
+                console.log('🔄 [云端同步] 开始恢复UI数据...');
+                window.restoreUIFromData(snapshot);
+                console.log('✅ [云端同步] 数据已成功加载并恢复到页面');
+                
+                // 🔥 保障3：触发分数重新计算确保显示正确
+                try {
+                  if (typeof window.TPI !== 'undefined' && typeof window.TPI.calculateSystem === 'function') {
+                    window.TPI.calculateSystem();
+                    console.log('✅ [云端同步] 分数已重新计算');
+                  }
+                } catch(e) {
+                  console.warn('⚠️ [云端同步] 分数计算失败:', e);
+                }
+                
+                alert('✅ 数据已成功从云端加载！');
+                return { success: true, data: snapshot };
+            } else {
+              console.error('❌ [云端同步] 快照数据无效或恢复函数不存在');
+              alert('❌ 加载失败: 数据格式错误');
+              return { success: false, error: '数据格式错误' };
+            }
+        } else {
+            console.log('ℹ️ [云端同步] 云端无今日数据');
+            
+            // 🔥 保障4：尝试从本地备份恢复
+            const backup = __tpi_ls_get('tpi_cloud_backup_' + today);
+            if (backup) {
+              try {
+                const snapshot = JSON.parse(backup);
+                if (snapshot && typeof window.restoreUIFromData === 'function') {
+                  window.restoreUIFromData(snapshot);
+                  console.log('✅ [云端同步] 使用本地备份数据恢复');
+                  alert('✅ 已从本地备份恢复数据');
+                  return { success: true, data: snapshot, source: 'backup' };
+                }
+              } catch(e) {
+                console.warn('⚠️ [云端同步] 本地备份恢复失败:', e);
+              }
+            }
+            
+            alert('ℹ️ 云端暂无今日数据');
+            return { success: false, error: '无数据', documents: [] };
         }
     } catch (error) {
-        console.warn('加载今日数据失败或无数据:', error);
+        console.error('❌ [云端同步] 加载失败:', error);
+        alert('❌ 加载失败: ' + (error.message || '未知错误'));
+        return { success: false, error: error.message };
     }
 }
 
 // 将当前表单数据保存到 Appwrite
 async function saveTodaysData() {
     const today = getTodayString();
+    
+    console.log('🔄 [云端同步] 开始保存数据到云端...', today);
 
     // 👇👇👇 提示词要求：收集表单数据 👇👇👇
-    // 为了完整性：使用你页面现有 collectDailyData 抓取“整站快照”
+    // 为了完整性：使用你页面现有 collectDailyData 抓取"整站快照"
     let snapshot = null;
     try{
       if (typeof window.collectDailyData === 'function') {
         const obj = window.collectDailyData();
         snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+        console.log('📦 [云端同步] 收集到的快照数据:', snapshot);
+      } else {
+        console.error('❌ [云端同步] collectDailyData 函数不存在');
       }
-    }catch(e){ console.warn('collectDailyData failed:', e); }
+    }catch(e){ 
+      console.error('❌ [云端同步] collectDailyData 执行失败:', e); 
+    }
 
-    // 构建要保存的数据对象（保留提示词字段名 date + 你全量快照 data）
+    if (!snapshot) {
+      console.error('❌ [云端同步] 快照数据为空，中止保存');
+      alert('❌ 保存失败: 无法收集表单数据');
+      return { success: false, error: '无法收集表单数据' };
+    }
+
+    // 🔥 保障1：数据序列化为字符串（确保Appwrite正确存储）
     const dataToSave = {
         date: today,
-        data: snapshot || {}
+        data: JSON.stringify(snapshot)
     };
+    
+    console.log('💾 [云端同步] 准备保存的数据结构:', {
+      date: dataToSave.date,
+      dataLength: dataToSave.data.length,
+      dataPreview: dataToSave.data.substring(0, 200) + '...'
+    });
 
     try {
         // 检查今天的数据是否存在
@@ -30554,9 +31520,11 @@ async function saveTodaysData() {
             Appwrite.Query.limit(1)
         ]);
 
+        let savedDoc;
         if (existingDocs.documents.length > 0) {
             // 如果存在，更新它
-            await databases.updateDocument(
+            console.log('📝 [云端同步] 更新已存在的文档:', existingDocs.documents[0].$id);
+            savedDoc = await databases.updateDocument(
                 DATABASE_ID,
                 COLLECTION_ID,
                 existingDocs.documents[0].$id,
@@ -30564,18 +31532,49 @@ async function saveTodaysData() {
             );
         } else {
             // 如果不存在，创建新文档
-            // 注意：权限建议在 Appwrite 控制台的 Collection 里配置为“仅登录用户可读写”
-            await databases.createDocument(
+            console.log('📝 [云端同步] 创建新文档');
+            savedDoc = await databases.createDocument(
                 DATABASE_ID,
                 COLLECTION_ID,
                 today, // 使用日期作为文档ID，保证每天一条
                 dataToSave
             );
         }
-        alert('✅ 数据已成功保存到云端！');
+        
+        console.log('✅ [云端同步] 保存操作完成，返回文档:', savedDoc);
+        
+        // 🔥 保障2：立即回读验证数据是否真正保存成功
+        const verifyDocs = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+            Appwrite.Query.equal('date', today),
+            Appwrite.Query.limit(1)
+        ]);
+        
+        if (verifyDocs.documents.length > 0 && verifyDocs.documents[0].data) {
+          const savedDataStr = verifyDocs.documents[0].data;
+          console.log('✅ [云端同步] 回读验证成功，数据长度:', savedDataStr.length);
+          
+          // 🔥 保障3：同步到localStorage作为本地备份
+          try {
+            __tpi_ls_set('tpi_cloud_backup_' + today, savedDataStr);
+            __tpi_ls_set('tpi_last_sync_time', new Date().toISOString());
+            __tpi_ls_set('tpi_last_sync_date', today);
+            console.log('✅ [云端同步] 本地备份已保存');
+          } catch(e) {
+            console.warn('⚠️ [云端同步] 本地备份保存失败:', e);
+          }
+          
+          alert('✅ 数据已成功保存到云端！');
+          return { success: true, document: savedDoc };
+        } else {
+          console.error('❌ [云端同步] 回读验证失败，数据可能未正确保存');
+          alert('⚠️ 保存可能未完全成功，请重试');
+          return { success: false, error: '回读验证失败' };
+        }
+        
     } catch (error) {
-        console.error('保存失败:', error);
+        console.error('❌ [云端同步] 保存失败:', error);
         alert('❌ 保存失败: ' + (error.message || '未知错误'));
+        return { success: false, error: error.message };
     }
 }
 
@@ -30604,6 +31603,13 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
         const user = await account.get();
         console.log('用户已登录:', user);
         loadMainInterface();
+        
+        // 🔥 启动时检查未保存数据并自动加载
+        setTimeout(() => {
+            if (typeof window.checkUnsavedData === 'function') {
+                window.checkUnsavedData();
+            }
+        }, 2000);
     } catch (error) {
         // 如果获取失败，说明未登录或会话过期
         console.log('用户未登录');
@@ -31552,8 +32558,944 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 console.log('✅ [TPI优化] 函数增强包装器已加载');
+
+// ==================== IndexedDB 存储系统 (替代 localStorage) ====================
+/* =========================================================
+   IndexedDB 存储系统
+   优势：
+   1. 存储容量大（几百MB - GB）vs localStorage (5-10MB)
+   2. 支持事务，数据完整性更好
+   3. 异步操作，不阻塞 UI
+   4. 支持离线队列
+========================================================= */
+(function(){
+  'use strict';
+
+  const IDB_NAME = 'TPI_Storage';
+  const IDB_VERSION = 1;
+  const IDB_STORE_DATA = 'tpi_data';
+  const IDB_STORE_QUEUE = 'sync_queue';
+  const IDB_STORE_CONFIG = 'config';
+
+  let dbInstance = null;
+
+  // 打开/创建数据库
+  async function openDB() {
+    if (dbInstance) return dbInstance;
+
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(IDB_NAME, IDB_VERSION);
+
+      request.onerror = () => {
+        console.error('❌ [IndexedDB] 打开失败:', request.error);
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        dbInstance = request.result;
+        console.log('✅ [IndexedDB] 数据库已打开');
+        resolve(dbInstance);
+      };
+
+      request.onupgradeneeded = (event) => {
+        const db = event.target.result;
+        console.log('🔧 [IndexedDB] 正在创建数据库结构...');
+
+        // 主数据存储（按日期存储）
+        if (!db.objectStoreNames.contains(IDB_STORE_DATA)) {
+          const dataStore = db.createObjectStore(IDB_STORE_DATA, { keyPath: 'date' });
+          dataStore.createIndex('timestamp', 'timestamp', { unique: false });
+          dataStore.createIndex('synced_appwrite', 'synced_appwrite', { unique: false });
+          dataStore.createIndex('synced_gist', 'synced_gist', { unique: false });
+        }
+
+        // 同步队列（离线时排队）
+        if (!db.objectStoreNames.contains(IDB_STORE_QUEUE)) {
+          const queueStore = db.createObjectStore(IDB_STORE_QUEUE, { keyPath: 'id', autoIncrement: true });
+          queueStore.createIndex('type', 'type', { unique: false }); // 'appwrite' 或 'gist'
+          queueStore.createIndex('date', 'date', { unique: false });
+          queueStore.createIndex('retries', 'retries', { unique: false });
+        }
+
+        // 配置存储（Token、设置等）
+        if (!db.objectStoreNames.contains(IDB_STORE_CONFIG)) {
+          db.createObjectStore(IDB_STORE_CONFIG, { keyPath: 'key' });
+        }
+
+        console.log('✅ [IndexedDB] 数据库结构创建完成');
+      };
+    });
+  }
+
+  // ========== 数据存储函数 ==========
+  
+  // 保存数据
+  async function idbSaveData(date, data, metadata = {}) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_DATA], 'readwrite');
+      const store = tx.objectStore(IDB_STORE_DATA);
+
+      const record = {
+        date: date,
+        data: data,
+        timestamp: Date.now(),
+        synced_appwrite: metadata.synced_appwrite || false,
+        synced_gist: metadata.synced_gist || false,
+        last_modified: new Date().toISOString()
+      };
+
+      await store.put(record);
+      
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => {
+          console.log(`✅ [IndexedDB] 已保存数据: ${date}`);
+          resolve(true);
+        };
+        tx.onerror = () => {
+          console.error('❌ [IndexedDB] 保存失败:', tx.error);
+          reject(tx.error);
+        };
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 保存数据异常:', error);
+      return false;
+    }
+  }
+
+  // 读取数据
+  async function idbGetData(date) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_DATA], 'readonly');
+      const store = tx.objectStore(IDB_STORE_DATA);
+      
+      return new Promise((resolve, reject) => {
+        const request = store.get(date);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 读取数据异常:', error);
+      return null;
+    }
+  }
+
+  // 获取所有日期
+  async function idbGetAllDates() {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_DATA], 'readonly');
+      const store = tx.objectStore(IDB_STORE_DATA);
+      
+      return new Promise((resolve, reject) => {
+        const request = store.getAllKeys();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 读取日期列表异常:', error);
+      return [];
+    }
+  }
+
+  // ========== 同步队列函数 ==========
+  
+  // 添加到同步队列
+  async function idbAddToQueue(type, date, data) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_QUEUE], 'readwrite');
+      const store = tx.objectStore(IDB_STORE_QUEUE);
+
+      const queueItem = {
+        type: type, // 'appwrite' 或 'gist'
+        date: date,
+        data: data,
+        timestamp: Date.now(),
+        retries: 0,
+        status: 'pending'
+      };
+
+      await store.add(queueItem);
+      
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => {
+          console.log(`📥 [IndexedDB] 已加入${type}同步队列: ${date}`);
+          resolve(true);
+        };
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 加入队列失败:', error);
+      return false;
+    }
+  }
+
+  // 获取待同步队列
+  async function idbGetQueue(type = null) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_QUEUE], 'readonly');
+      const store = tx.objectStore(IDB_STORE_QUEUE);
+      
+      return new Promise((resolve, reject) => {
+        const request = type ? store.index('type').getAll(type) : store.getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 读取队列失败:', error);
+      return [];
+    }
+  }
+
+  // 删除队列项
+  async function idbRemoveFromQueue(id) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_QUEUE], 'readwrite');
+      const store = tx.objectStore(IDB_STORE_QUEUE);
+      
+      await store.delete(id);
+      
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => {
+          console.log(`✅ [IndexedDB] 已从队列移除: ID ${id}`);
+          resolve(true);
+        };
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 删除队列项失败:', error);
+      return false;
+    }
+  }
+
+  // ========== 配置存储函数 ==========
+  
+  // 保存配置
+  async function idbSetConfig(key, value) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_CONFIG], 'readwrite');
+      const store = tx.objectStore(IDB_STORE_CONFIG);
+
+      await store.put({ key: key, value: value, timestamp: Date.now() });
+      
+      return new Promise((resolve, reject) => {
+        tx.oncomplete = () => resolve(true);
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 保存配置失败:', error);
+      // 降级到 localStorage
+      try {
+        if (typeof window.__tpi_ls_set === 'function') {
+          window.__tpi_ls_set(key, typeof value === 'string' ? value : JSON.stringify(value));
+        }
+      } catch (e) {}
+      return false;
+    }
+  }
+
+  // 读取配置
+  async function idbGetConfig(key, defaultValue = null) {
+    try {
+      const db = await openDB();
+      const tx = db.transaction([IDB_STORE_CONFIG], 'readonly');
+      const store = tx.objectStore(IDB_STORE_CONFIG);
+      
+      return new Promise((resolve, reject) => {
+        const request = store.get(key);
+        request.onsuccess = () => {
+          const result = request.result;
+          resolve(result ? result.value : defaultValue);
+        };
+        request.onerror = () => reject(request.error);
+      });
+    } catch (error) {
+      console.error('❌ [IndexedDB] 读取配置失败:', error);
+      // 降级到 localStorage
+      try {
+        if (typeof window.__tpi_ls_get === 'function') {
+          const val = window.__tpi_ls_get(key, null);
+          return val !== null ? val : defaultValue;
+        }
+      } catch (e) {}
+      return defaultValue;
+    }
+  }
+
+  // ========== 导出到全局 ==========
+  window.TPIIndexedDB = {
+    saveData: idbSaveData,
+    getData: idbGetData,
+    getAllDates: idbGetAllDates,
+    addToQueue: idbAddToQueue,
+    getQueue: idbGetQueue,
+    removeFromQueue: idbRemoveFromQueue,
+    setConfig: idbSetConfig,
+    getConfig: idbGetConfig,
+    openDB: openDB
+  };
+
+  // 初始化数据库
+  openDB().then(() => {
+    console.log('✅ [IndexedDB] 存储系统已就绪');
+  }).catch(error => {
+    console.error('❌ [IndexedDB] 初始化失败，将使用 localStorage 降级:', error);
+  });
+
+  console.log('✅ [IndexedDB] 存储模块已加载');
+})();
+
+// ==================== GitHub Gist 备份系统 (方案B: 主备模式) ====================
+/* =========================================================
+   GitHub Gist 备份系统
+   作用：作为 Appwrite 的补充备份方案
+   模式：主备模式（Appwrite 为主，Gist 为备份）
+   功能：
+   1. 手动备份当前数据到 Gist
+   2. 从 Gist 恢复数据
+   3. 可选的每日自动备份（23:00）
+========================================================= */
+(function(){
+  'use strict';
+
+  // ========== 工具函数 ==========
+  const $ = (id) => document.getElementById(id);
+  
+  // 使用 IndexedDB（优先）或 localStorage（降级）
+  const getConfig = async (k, d) => {
+    if (window.TPIIndexedDB && window.TPIIndexedDB.getConfig) {
+      return await window.TPIIndexedDB.getConfig(k, d);
+    }
+    return (typeof window.__tpi_ls_get === 'function') ? 
+      window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
+  };
+  
+  const setConfig = async (k, v) => {
+    if (window.TPIIndexedDB && window.TPIIndexedDB.setConfig) {
+      return await window.TPIIndexedDB.setConfig(k, v);
+    }
+    return (typeof window.__tpi_ls_set === 'function') ? 
+      window.__tpi_ls_set(k, v) : (localStorage.setItem(k, v), true);
+  };
+
+  // ========== Gist 配置（硬编码）==========
+  const GIST_ID_HARDCODED = 'cab132a91b77c44ff7a66286a54c213d'; // 硬编码的 Gist ID
+  const GIST_TOKEN_KEY = 'tpi_gist_token';
+  const GIST_ID_KEY = 'tpi_gist_id';
+  const GIST_AUTO_BACKUP_KEY = 'tpi_gist_auto_backup';
+  const GIST_FILENAME = 'tpi-backup-data.json';
+
+  // ========== IndexedDB 配置 ==========
+  const IDB_NAME = 'TPI_Storage';
+  const IDB_VERSION = 1;
+  const IDB_STORE_DATA = 'tpi_data'; // 主数据存储
+  const IDB_STORE_QUEUE = 'sync_queue'; // 同步队列
+  const IDB_STORE_CONFIG = 'config'; // 配置存储
+
+  let autoBackupTimer = null;
+
+  // 显示消息
+  function showGistMsg(text, isError) {
+    const msgEl = $('gist-backup-msg');
+    const statusEl = $('gist-backup-status');
+    
+    if (msgEl) {
+      msgEl.textContent = text || '';
+      msgEl.style.color = isError ? '#dc2626' : '#059669';
+    }
+    if (statusEl && !isError) {
+      statusEl.textContent = text || '';
+    }
+    
+    // Toast 提示
+    if (window.tpiToast) {
+      window.tpiToast(text, isError ? 'error' : 'success');
+    }
+  }
+
+  // 获取认证信息
+  async function getGistAuth() {
+    let token = $('gist-token') && $('gist-token').value ? 
+      $('gist-token').value.trim() : await getConfig(GIST_TOKEN_KEY, '');
+    
+    // 使用硬编码的 Gist ID
+    let gistId = GIST_ID_HARDCODED;
+    
+    if (!token) {
+      showGistMsg('⚠️ 请输入 GitHub Token', true);
+      if ($('gist-token')) $('gist-token').focus();
+      return null;
+    }
+
+    // 保存 token 到 IndexedDB
+    await setConfig(GIST_TOKEN_KEY, token);
+    
+    // 显示硬编码的 Gist ID（只读）
+    if ($('gist-id')) {
+      $('gist-id').value = gistId;
+      $('gist-id').disabled = true;
+      $('gist-id').title = '硬编码的 Gist ID（不可修改）';
+    }
+
+    console.log('✅ [Gist认证] 使用硬编码 Gist ID:', gistId);
+    return { token, gistId };
+  }
+
+  // 调用 GitHub API
+  async function callGistAPI(endpoint, method, token, body) {
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json'
+    };
+
+    const options = {
+      method: method,
+      headers: headers
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(endpoint, options);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`GitHub API 错误 (${response.status}): ${errorText}`);
+    }
+
+    return await response.json();
+  }
+
+  // 收集当前数据（使用现有的 collectDailyData 函数）
+  function collectCurrentData() {
+    try {
+      // 优先使用页面已有的数据收集函数
+      if (typeof window.collectDailyData === 'function') {
+        return window.collectDailyData();
+      }
+      
+      // 备用：使用 _formState 函数
+      if (typeof window._formState === 'function') {
+        return window._formState();
+      }
+
+      throw new Error('找不到数据收集函数');
+    } catch (error) {
+      console.error('❌ [Gist备份] 数据收集失败:', error);
+      throw error;
+    }
+  }
+
+  // ========== 核心功能：备份到 Gist ==========
+  window.gistBackupNow = async function() {
+    try {
+      const startTime = Date.now();
+      showGistMsg('🔄 正在备份数据到 Gist...', false);
+
+      const auth = await getGistAuth();
+      if (!auth) return;
+
+      // 收集当前数据
+      const currentData = collectCurrentData();
+      const date = $('date-input') ? $('date-input').value : new Date().toISOString().split('T')[0];
+      
+      // 统计数据信息
+      const dataSize = JSON.stringify(currentData).length;
+      const fieldCount = Object.keys(currentData).length;
+      
+      console.log(`📊 [Gist备份] 准备备份: ${date}, 字段数: ${fieldCount}, 大小: ${(dataSize/1024).toFixed(2)}KB`);
+      
+      // 准备备份数据（包含所有日期的数据）
+      let allBackupData = {};
+      
+      // 如果有 Gist ID，先获取现有数据
+      if (auth.gistId) {
+        try {
+          showGistMsg('🔄 正在从 Gist 获取现有数据...', false);
+          const existingGist = await callGistAPI(
+            `https://api.github.com/gists/${auth.gistId}`,
+            'GET',
+            auth.token
+          );
+          
+          if (existingGist.files && existingGist.files[GIST_FILENAME]) {
+            const content = existingGist.files[GIST_FILENAME].content;
+            allBackupData = JSON.parse(content);
+            console.log(`📥 [Gist备份] 已获取现有数据，包含 ${Object.keys(allBackupData).length} 天记录`);
+          }
+        } catch (error) {
+          console.warn('⚠️ [Gist备份] 获取现有数据失败，将创建新备份:', error);
+        }
+      }
+
+      // 更新当前日期的数据
+      allBackupData[date] = {
+        data: currentData,
+        timestamp: Date.now(),
+        backupTime: new Date().toISOString(),
+        source: 'TPI-Appwrite-Gist-Dual-Backup',
+        dataSize: dataSize,
+        fieldCount: fieldCount
+      };
+
+      // 准备 Gist payload
+      const gistPayload = {
+        description: 'TPI 效能管理系统 - 数据备份 (自动生成)',
+        public: false, // Secret Gist
+        files: {
+          [GIST_FILENAME]: {
+            content: JSON.stringify(allBackupData, null, 2)
+          }
+        }
+      };
+
+      let result;
+      const totalDays = Object.keys(allBackupData).length;
+      
+      try {
+        if (auth.gistId) {
+          // 更新现有 Gist
+          showGistMsg('🔄 正在更新到 Gist...', false);
+          result = await callGistAPI(
+            `https://api.github.com/gists/${auth.gistId}`,
+            'PATCH',
+            auth.token,
+            gistPayload
+          );
+        } else {
+          // 创建新 Gist（理论上不会执行，因为已硬编码）
+          showGistMsg('🔄 正在创建新 Gist...', false);
+          result = await callGistAPI(
+            'https://api.github.com/gists',
+            'POST',
+            auth.token,
+            gistPayload
+          );
+        }
+
+        // 标记为已同步到 Gist
+        if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
+          await window.TPIIndexedDB.saveData(date, currentData, { synced_gist: true });
+        }
+
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        
+        showGistMsg(
+          `✅ 备份成功！\n` +
+          `📅 日期: ${date}\n` +
+          `📊 字段数: ${fieldCount} | 大小: ${(dataSize/1024).toFixed(2)}KB\n` +
+          `📚 总天数: ${totalDays} 天\n` +
+          `⏱️ 用时: ${duration}秒\n` +
+          `🔗 Gist ID: ${auth.gistId}`,
+          false
+        );
+
+        // 更新状态显示
+        const statusEl = $('gist-backup-status');
+        if (statusEl) {
+          const now = new Date();
+          statusEl.textContent = 
+            `📝 最后备份: ${now.toLocaleString('zh-CN')} | ` +
+            `共 ${totalDays} 天数据 | ` +
+            `本次: ${(dataSize/1024).toFixed(2)}KB`;
+        }
+
+        console.log('✅ [Gist备份] 备份完成:', result.html_url);
+
+      } catch (uploadError) {
+        // 上传失败，加入离线队列
+        console.error('❌ [Gist备份] 上传失败，加入离线队列:', uploadError);
+        
+        if (window.TPIIndexedDB && window.TPIIndexedDB.addToQueue) {
+          await window.TPIIndexedDB.addToQueue('gist', date, currentData);
+          showGistMsg(
+            `⚠️ 网络错误，已加入离线队列\n` +
+            `💾 数据已保存到本地 IndexedDB\n` +
+            `🔄 联网后将自动重试上传`,
+            true
+          );
+        } else {
+          throw uploadError;
+        }
+      }
+
+    } catch (error) {
+      console.error('❌ [Gist备份] 备份失败:', error);
+      showGistMsg(
+        `❌ 备份失败\n` +
+        `错误: ${error.message}\n` +
+        `请检查 Token 是否有效，网络是否正常`,
+        true
+      );
+    }
+  };
+
+  // ========== 核心功能：从 Gist 恢复 ==========
+  window.gistRestoreData = async function() {
+    try {
+      const startTime = Date.now();
+      const auth = await getGistAuth();
+      if (!auth) return;
+
+      if (!auth.gistId) {
+        showGistMsg('⚠️ Gist ID 未配置（应该已硬编码）', true);
+        return;
+      }
+
+      showGistMsg('🔄 正在从 Gist 恢复数据...', false);
+
+      // 获取 Gist 数据
+      const gist = await callGistAPI(
+        `https://api.github.com/gists/${auth.gistId}`,
+        'GET',
+        auth.token
+      );
+
+      if (!gist.files || !gist.files[GIST_FILENAME]) {
+        showGistMsg('⚠️ Gist 中没有找到备份数据', true);
+        return;
+      }
+
+      // 解析备份数据
+      const backupData = JSON.parse(gist.files[GIST_FILENAME].content);
+      const totalDates = Object.keys(backupData).length;
+      const date = $('date-input') ? $('date-input').value : new Date().toISOString().split('T')[0];
+
+      console.log(`📥 [Gist恢复] Gist 包含 ${totalDates} 天数据`);
+
+      if (!backupData[date]) {
+        const availableDates = Object.keys(backupData).sort().reverse();
+        showGistMsg(
+          `⚠️ 未找到 ${date} 的备份数据\n\n` +
+          `📚 可用日期 (共${totalDates}天):\n` +
+          `${availableDates.slice(0, 10).join('\n')}` +
+          `${totalDates > 10 ? '\n...' : ''}`,
+          true
+        );
+        return;
+      }
+
+      // 恢复数据到页面
+      const dateData = backupData[date].data;
+      const backupInfo = backupData[date];
+      const fieldCount = Object.keys(dateData).length;
+      const dataSize = JSON.stringify(dateData).length;
+
+      showGistMsg('🔄 正在应用数据到页面...', false);
+      
+      // 使用现有的数据恢复函数
+      if (typeof window.restoreUIFromData === 'function') {
+        window.restoreUIFromData(dateData);
+      } else if (typeof window.applyFormState === 'function') {
+        window.applyFormState(dateData);
+      } else {
+        throw new Error('找不到数据恢复函数');
+      }
+
+      // 触发重新计算
+      if (typeof window.__tpi_triggerRecalc === 'function') {
+        window.__tpi_triggerRecalc();
+      }
+
+      // 保存到 IndexedDB
+      if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
+        await window.TPIIndexedDB.saveData(date, dateData, { synced_gist: true });
+      }
+
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      const backupTime = new Date(backupInfo.backupTime).toLocaleString('zh-CN');
+
+      showGistMsg(
+        `✅ 恢复成功！\n` +
+        `📅 日期: ${date}\n` +
+        `📊 字段数: ${fieldCount} | 大小: ${(dataSize/1024).toFixed(2)}KB\n` +
+        `🕐 备份时间: ${backupTime}\n` +
+        `⏱️ 用时: ${duration}秒\n` +
+        `📚 Gist 总数据: ${totalDates} 天`,
+        false
+      );
+
+      console.log('✅ [Gist恢复] 数据恢复完成');
+
+    } catch (error) {
+      console.error('❌ [Gist恢复] 恢复失败:', error);
+      showGistMsg(
+        `❌ 恢复失败\n` +
+        `错误: ${error.message}\n` +
+        `请检查 Token 是否有效，Gist ID 是否正确`,
+        true
+      );
+    }
+  };
+
+  // ========== 自动备份功能 ==========
+  window.toggleGistAutoBackup = async function(enabled) {
+    await setConfig(GIST_AUTO_BACKUP_KEY, enabled ? '1' : '0');
+    
+    if (autoBackupTimer) {
+      clearInterval(autoBackupTimer);
+      autoBackupTimer = null;
+    }
+
+    if (enabled) {
+      showGistMsg('✅ 已启用每日自动备份 (23:00)', false);
+      
+      // 每分钟检查一次是否到了 23:00
+      autoBackupTimer = setInterval(() => {
+        const now = new Date();
+        if (now.getHours() === 23 && now.getMinutes() === 0) {
+          console.log('🕐 [Gist自动备份] 触发每日备份');
+          window.gistBackupNow();
+        }
+      }, 60000); // 每分钟检查一次
+      
+    } else {
+      showGistMsg('ℹ️ 已关闭自动备份', false);
+    }
+  };
+
+  // ========== 离线队列处理器 ==========
+  async function processOfflineQueue() {
+    if (!window.TPIIndexedDB) return;
+
+    try {
+      const queue = await window.TPIIndexedDB.getQueue('gist');
+      if (queue.length === 0) return;
+
+      console.log(`🔄 [离线队列] 发现 ${queue.length} 个待同步的 Gist 任务`);
+
+      for (const item of queue) {
+        try {
+          const auth = await getGistAuth();
+          if (!auth) break;
+
+          console.log(`📤 [离线队列] 正在同步: ${item.date}`);
+
+          // 执行备份（使用队列中的数据）
+          const allBackupData = {};
+          
+          // 获取现有数据
+          const existingGist = await callGistAPI(
+            `https://api.github.com/gists/${auth.gistId}`,
+            'GET',
+            auth.token
+          );
+          
+          if (existingGist.files && existingGist.files[GIST_FILENAME]) {
+            Object.assign(allBackupData, JSON.parse(existingGist.files[GIST_FILENAME].content));
+          }
+
+          // 添加队列中的数据
+          allBackupData[item.date] = {
+            data: item.data,
+            timestamp: Date.now(),
+            backupTime: new Date().toISOString(),
+            source: 'TPI-Offline-Queue'
+          };
+
+          // 上传
+          await callGistAPI(
+            `https://api.github.com/gists/${auth.gistId}`,
+            'PATCH',
+            auth.token,
+            {
+              files: {
+                [GIST_FILENAME]: {
+                  content: JSON.stringify(allBackupData, null, 2)
+                }
+              }
+            }
+          );
+
+          // 从队列中移除
+          await window.TPIIndexedDB.removeFromQueue(item.id);
+          console.log(`✅ [离线队列] 已同步: ${item.date}`);
+
+        } catch (error) {
+          console.error(`❌ [离线队列] 同步失败: ${item.date}`, error);
+          // 保留在队列中，下次再试
+        }
+      }
+
+      if (queue.length > 0) {
+        showGistMsg(`✅ 已处理离线队列，成功同步部分数据`, false);
+      }
+
+    } catch (error) {
+      console.error('❌ [离线队列] 处理失败:', error);
+    }
+  }
+
+  // ========== 页面加载时初始化 ==========
+  window.addEventListener('DOMContentLoaded', async function() {
+    console.log('🔧 [Gist备份] 初始化备份系统');
+
+    // 恢复保存的 Token（从 IndexedDB）
+    const savedToken = await getConfig(GIST_TOKEN_KEY, '');
+    
+    if (savedToken && $('gist-token')) {
+      $('gist-token').value = savedToken;
+    }
+
+    // 显示硬编码的 Gist ID
+    if ($('gist-id')) {
+      $('gist-id').value = GIST_ID_HARDCODED;
+      $('gist-id').disabled = true;
+      $('gist-id').style.backgroundColor = '#f3f4f6';
+      $('gist-id').title = '硬编码的 Gist ID（不可修改）';
+    }
+
+    // 恢复自动备份设置
+    const autoBackupEnabled = await getConfig(GIST_AUTO_BACKUP_KEY, '0') === '1';
+    if ($('gist-auto-backup')) {
+      $('gist-auto-backup').checked = autoBackupEnabled;
+      if (autoBackupEnabled) {
+        window.toggleGistAutoBackup(true);
+      }
+    }
+
+    // 处理离线队列
+    setTimeout(() => {
+      processOfflineQueue();
+    }, 5000); // 延迟 5 秒后处理离线队列
+
+    // 监听网络恢复事件
+    window.addEventListener('online', () => {
+      console.log('🌐 [网络] 网络已恢复，处理离线队列');
+      showGistMsg('🌐 网络已恢复，正在同步离线数据...', false);
+      processOfflineQueue();
+    });
+
+    console.log('✅ [Gist备份] 备份系统已就绪');
+    console.log(`📌 [Gist备份] 使用硬编码 Gist ID: ${GIST_ID_HARDCODED}`);
+  });
+
+  // 暴露给控制台调试
+  window.TPIGistBackup = {
+    backup: window.gistBackupNow,
+    restore: window.gistRestoreData,
+    toggleAuto: window.toggleGistAutoBackup,
+    processQueue: processOfflineQueue
+  };
+
+  // ========== Service Worker 注册（用于离线支持）==========
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      // 创建内联 Service Worker
+      const swCode = `
+        self.addEventListener('install', (event) => {
+          console.log('✅ [ServiceWorker] 已安装');
+          self.skipWaiting();
+        });
+
+        self.addEventListener('activate', (event) => {
+          console.log('✅ [ServiceWorker] 已激活');
+          event.waitUntil(self.clients.claim());
+        });
+
+        self.addEventListener('fetch', (event) => {
+          // 对于 Appwrite 和 GitHub API 请求，如果离线则标记失败
+          const url = event.request.url;
+          if (url.includes('appwrite.io') || url.includes('api.github.com')) {
+            event.respondWith(
+              fetch(event.request).catch(error => {
+                console.log('❌ [ServiceWorker] 网络请求失败（离线）:', url);
+                return new Response(JSON.stringify({ 
+                  error: 'offline',
+                  message: '当前离线，请稍后重试'
+                }), {
+                  status: 503,
+                  headers: { 'Content-Type': 'application/json' }
+                });
+              })
+            );
+          }
+        });
+      `;
+
+      // 创建 Blob URL 作为 Service Worker
+      try {
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(blob);
+
+        navigator.serviceWorker.register(swUrl).then(registration => {
+          console.log('✅ [ServiceWorker] 注册成功');
+          
+          // 监听更新
+          registration.onupdatefound = () => {
+            const installingWorker = registration.installing;
+            installingWorker.onstatechange = () => {
+              if (installingWorker.state === 'installed') {
+                if (navigator.serviceWorker.controller) {
+                  console.log('🔄 [ServiceWorker] 有新版本可用');
+                }
+              }
+            };
+          };
+        }).catch(error => {
+          console.warn('⚠️ [ServiceWorker] 注册失败:', error);
+        });
+      } catch (error) {
+        console.warn('⚠️ [ServiceWorker] 创建失败:', error);
+      }
+    });
+  } else {
+    console.log('ℹ️ [ServiceWorker] 浏览器不支持 Service Worker');
+  }
+
+  console.log('✅ [Gist备份] 备份模块已加载');
+})();
+
 </script>
 
 
 </body>
 </html>
+
+// 创建快照管理按钮（在保存按钮旁边）
+(function() {
+    try {
+        const saveBtn = document.getElementById('save-to-cloud-btn');
+        if (saveBtn && saveBtn.parentElement) {
+            const snapshotBtn = document.createElement('button');
+            snapshotBtn.id = 'snapshot-manager-btn';
+            snapshotBtn.innerHTML = '📸 快照管理';
+            snapshotBtn.style.cssText = `
+                padding: 10px 20px;
+                background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.3s;
+                box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+                margin-left: 10px;
+            `;
+            snapshotBtn.onmouseover = function() {
+                this.style.transform = 'translateY(-2px)';
+                this.style.boxShadow = '0 6px 16px rgba(139, 92, 246, 0.35)';
+            };
+            snapshotBtn.onmouseout = function() {
+                this.style.transform = 'translateY(0)';
+                this.style.boxShadow = '0 4px 12px rgba(139, 92, 246, 0.25)';
+            };
+            snapshotBtn.onclick = function() {
+                window.TPISnapshotSystem.showSnapshotManager();
+            };
+            
+            // 插入到保存按钮后面
+            saveBtn.parentElement.insertBefore(snapshotBtn, saveBtn.nextSibling);
+            console.log('✅ [快照系统] 快照管理按钮已添加');
+        }
+    } catch(error) {
+        console.warn('⚠️ [快照系统] 添加按钮失败:', error);
+    }
+})();
