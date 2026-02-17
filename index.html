@@ -268,6 +268,9 @@ console.log('✅ 日期初始化脚本已加载');
 
 <!-- ⭐ Appwrite SDK 引入 -->
 <script src="https://cdn.jsdelivr.net/npm/appwrite@13.0.0"></script>
+<!-- ⭐ LZ-String (用于数据压缩传输) -->
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+
 
 <script>
 /* =========================================================
@@ -4014,6 +4017,461 @@ window.__tpi_legacy_exportDataComplete_3 = function(format) {
             TPI全维效能管理系统 | 数据日期: ${dateStr} | 导出时间: ${htmlExportTimeStr}
         </div>
     </div>
+
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
+
 </body>
 </html>`;
                 fileName += '.html';
@@ -5327,59 +5785,56 @@ window.exportAsCSV = function() {
     </div>
     <div id="tpi-sync-msg" style="margin-top:10px; font-size:14px;"></div>
     <p id="sync-status" style="margin-top:6px; font-size:13px; opacity:.9;"></p>
-  </div>
 
-  <!-- ========== Gist 备份区域 (方案B: 主备模式) ========== -->
-  <div style="margin-top:30px; padding-top:24px; border-top:2px dashed #e5e7eb;">
-    <div class="alert alert-warning mb-3">
-      <p><strong>💾 Gist 备份说明</strong>：将数据备份到 GitHub Gist，作为 Appwrite 的补充备份方案。<br>
-      <span style="opacity:.85">• 主同步：使用上方 Appwrite（快速实时）<br>
-      • 备份：使用 Gist（长期存档、版本历史）<br>
-      • 建议：每天睡前点击"备份到 Gist"，或开启自动备份</span></p>
-    </div>
-
-    <div id="gist-backup-panel" style="max-width: 820px;">
-      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end; margin-bottom:16px;">
-        <div class="form-group" style="min-width:400px; flex:1;">
-          <label for="gist-token" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">
-            GitHub Personal Access Token (需勾选 gist 权限):
-          </label>
-          <input id="gist-token" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" 
-                 style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
-          <div style="font-size:12px; color:#6b7280; margin-top:4px;">
-            🔗 <a href="https://github.com/settings/tokens/new?scopes=gist&description=TPI%20Backup" target="_blank" style="color:#2563eb;">点击这里创建 Token</a>
-          </div>
-        </div>
-        <div class="form-group" style="min-width:200px; flex:1;">
-          <label for="gist-id" style="font-weight:600; color:#374151; margin-bottom:5px; display:block;">
-            Gist ID (可选):
-          </label>
-          <input id="gist-id" type="text" placeholder="自动创建或输入已有ID" 
-                 style="width:100%; padding:10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
-          <div style="font-size:12px; color:#6b7280; margin-top:4px;">
-            首次备份会自动创建 Secret Gist
-          </div>
+    <div id="tpi-sync-advanced" style="margin-top:12px; padding:12px 14px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; justify-content:space-between;">
+        <div style="font-weight:800; color:#111827;">🧰 同步增强</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" id="tpi-sync-all-btn" style="padding:10px 14px; background: linear-gradient(135deg,#111827,#374151); color:white; border:none; border-radius:10px; font-weight:700; cursor:pointer;">
+            🔁 一键同步所有未同步日期
+          </button>
+          <button type="button" id="tpi-sync-refresh-stats" style="padding:10px 14px; background:#ffffff; border:1px solid #e5e7eb; border-radius:10px; font-weight:700; cursor:pointer;">
+            📊 刷新同步统计
+          </button>
         </div>
       </div>
 
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-        <button type="button" onclick="gistBackupNow()" 
-                style="padding:12px 20px; background: linear-gradient(135deg,#f59e0b,#d97706); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-          💾 立即备份到 Gist
-        </button>
-        <button type="button" onclick="gistRestoreData()" 
-                style="padding:12px 20px; background: linear-gradient(135deg,#8b5cf6,#7c3aed); color:white; border:none; border-radius:8px; font-weight:600; cursor:pointer;">
-          📥 从 Gist 恢复数据
-        </button>
-        <label style="display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none; padding:8px 12px; background:#f3f4f6; border-radius:8px;">
-          <input id="gist-auto-backup" type="checkbox" onchange="toggleGistAutoBackup(this.checked)">
-          <span style="font-weight:600; color:#374151;">每日自动备份 (23:00)</span>
+      <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:10px;">
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none;">
+          <input id="tpi-auto-night" type="checkbox">
+          <span style="font-weight:600; color:#374151;">仅夜间自动同步（22:00-07:00）</span>
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none;">
+          <input id="tpi-auto-wifi" type="checkbox">
+          <span style="font-weight:600; color:#374151;">仅在 Wi‑Fi / 高质量网络下自动同步（尽力判断）</span>
+        </label>
+        <label style="display:flex; gap:8px; align-items:center; cursor:pointer; user-select:none;">
+          <input id="tpi-auto-charging" type="checkbox">
+          <span style="font-weight:600; color:#374151;">电量充足时同步（若浏览器支持电池信息）</span>
         </label>
       </div>
 
-      <div id="gist-backup-msg" style="margin-top:10px; font-size:14px;"></div>
-      <div id="gist-backup-status" style="margin-top:6px; font-size:13px; opacity:.9; color:#059669;"></div>
+      <div id="tpi-sync-progress" style="margin-top:10px; font-size:13px; color:#111827;"></div>
+
+      <div style="margin-top:12px;">
+        <div style="font-weight:800; color:#111827; margin-bottom:8px;">📈 近 30 天同步统计</div>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:240px; padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px;">
+            <div style="font-weight:800; color:#111827; margin-bottom:6px;">次数趋势</div>
+            <canvas id="tpi-sync-chart-count" height="110"></canvas>
+          </div>
+          <div style="flex:1; min-width:240px; padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px;">
+            <div style="font-weight:800; color:#111827; margin-bottom:6px;">数据量趋势（KB）</div>
+            <canvas id="tpi-sync-chart-bytes" height="110"></canvas>
+          </div>
+        </div>
+        <div style="margin-top:10px; padding:10px 12px; background:#fff; border:1px solid #e5e7eb; border-radius:12px;">
+          <div style="font-weight:800; color:#111827; margin-bottom:6px;">🧾 同步日志（最近 50 条）</div>
+          <div id="tpi-sync-log-list" style="max-height:220px; overflow:auto; font-size:12px; line-height:1.5; color:#111827;"></div>
+        </div>
+      </div>
     </div>
+
   </div>
 
 </div>
@@ -22694,7 +23149,462 @@ window.addEventListener('resize', function() {
                         <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
                             <h3 style="margin:0;font-size:18px;color:#1e293b;">👁️ 报告预览</h3>
                             <div style="display:flex;gap:10px;">
-                                <button onclick="(function(){var p=document.getElementById('tpi-preview-body');if(p){var w=window.open('','_blank');if(w){w.document.write('<html><head><meta charset=UTF-8><title>TPI报告预览</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:20px;}h2{color:#2563eb;}table{width:100%;border-collapse:collapse;margin:20px 0;}th,td{padding:10px;border:1px solid #e5e7eb;}th{background:#f3f4f6;}.btn{padding:10px 20px;margin:10px 5px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff;}</style></head><body>'+p.innerHTML+'<div style=text-align:center;margin-top:30px><button class=btn onclick=window.print()>🖨️ 打印</button><button class=btn onclick=window.close()>关闭</button></div></body></html>');w.document.close();}}})()" style="padding:6px 14px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;color:#334155;transition:all 0.15s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'">🌐 新窗口打开</button>
+                                <button onclick="(function(){var p=document.getElementById('tpi-preview-body');if(p){var w=window.open('','_blank');if(w){w.document.write('<html><head><meta charset=UTF-8><title>TPI报告预览</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:20px;}h2{color:#2563eb;}table{width:100%;border-collapse:collapse;margin:20px 0;}th,td{padding:10px;border:1px solid #e5e7eb;}th{background:#f3f4f6;}.btn{padding:10px 20px;margin:10px 5px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff;}</style></head><body>'+p.innerHTML+'<div style=text-align:center;margin-top:30px><button class=btn onclick=window.print()>🖨️ 打印</button><button class=btn onclick=window.close()>关闭</button></div>
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
+
+</body></html>');w.document.close();}}})()" style="padding:6px 14px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;color:#334155;transition:all 0.15s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'">🌐 新窗口打开</button>
                                 <button onclick="document.getElementById('tpi-preview-modal').remove()" style="padding:6px 14px;border:none;border-radius:6px;background:#ef4444;color:#fff;cursor:pointer;font-size:13px;font-weight:600;transition:background 0.15s;" onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">✕ 关闭</button>
                             </div>
                         </div>
@@ -23452,7 +24362,462 @@ window.addEventListener('resize', function() {
             </div>
 
                         ${reportContent.innerHTML}
-                    </body>
+                    
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
+
+</body>
                     </html>
                 `);
                 printWindow.document.close();
@@ -23798,7 +25163,462 @@ window.addEventListener('resize', function() {
                 for (let key in allData) {
                     html += '<tr><td>' + key + '</td><td><pre>' + allData[key] + '</pre></td></tr>';
                 }
-                html += '</table></body></html>';
+                html += '</table>
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
+
+</body></html>';
                 dataStr = html;
                 filename = 'TPI_数据导出_' + new Date().toISOString().split('T')[0] + '.html';
                 mimeType = 'text/html';
@@ -25042,7 +26862,462 @@ html += `</head><body>
                             const date = key.replace('tpi_data_', '');
                             html += `<tr><td>${date}</td><td><pre>${allData[key]}</pre></td></tr>`;
                         }
-                        html += '</table></body></html>';
+                        html += '</table>
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
+
+</body></html>';
                         const blob = new Blob([html], { type: 'text/html' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
@@ -30182,16 +32457,6 @@ window.__tpi_syncDateToMain = function(){
         hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false 
       });
       
-      // ========== 保存到 IndexedDB（本地持久化）==========
-      try {
-        if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
-          await window.TPIIndexedDB.saveData(dateStr, payload, { synced_appwrite: true });
-          console.log('✅ [IndexedDB] 已保存到本地数据库');
-        }
-      } catch(idbError) {
-        console.warn('⚠️ [IndexedDB] 保存失败(不影响云端同步):', idbError);
-      }
-      
       console.log('✅ ═════════════════════════════════════════════════════');
       console.log('✅ [云同步] 上传成功');
       console.log(`📅 同步日期: ${dateStr}`);
@@ -30203,15 +32468,14 @@ window.__tpi_syncDateToMain = function(){
 
       showModal?.({
         type:'success',
-        title:'✅ Appwrite 云端同步成功',
+        title:'上传成功',
         message:
-          `✅ 已上传所选日期数据到 Appwrite 云端\n\n`+
+          `✅ 已上传所选日期数据到云端\n\n`+
           `📅 日期：${dateStr}\n`+
           `🆔 文档ID：${docId}\n`+
           `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
-          `💾 数据大小：${dataStr.length} 字符 (${dataSizeKB} KB / ${dataSizeMB} MB)\n`+
-          `⏰ 上传时间：${uploadTime}\n\n`+
-          `💡 提示：建议同时点击下方"💾 立即备份到 Gist"进行双重备份`,
+          `💾 数据大小：${dataStr.length} 字符 (${dataSizeKB} KB)\n`+
+          `⏰ 上传时间：${uploadTime}`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -30464,16 +32728,6 @@ const __download_end_time = Date.now();
       const dataSizeBytes = doc.data ? doc.data.length : 0;
       const dataSizeKB = (dataSizeBytes / 1024).toFixed(2);
       
-      // ========== 保存到 IndexedDB（本地持久化）==========
-      try {
-        if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
-          await window.TPIIndexedDB.saveData(dateStr, payload, { synced_appwrite: true });
-          console.log('✅ [IndexedDB] 已保存到本地数据库');
-        }
-      } catch(idbError) {
-        console.warn('⚠️ [IndexedDB] 保存失败(不影响数据恢复):', idbError);
-      }
-      
       console.log('📥 ═════════════════════════════════════════════════════');
       console.log('📥 [云同步] 下载成功');
       console.log(`📅 同步日期: ${dateStr}`);
@@ -30486,18 +32740,15 @@ const __download_end_time = Date.now();
 
       showModal?.({
         type:'success',
-        title:'✅ Appwrite 云端下载成功',
+        title:'下载成功',
         message:
-          `✅ 已从 Appwrite 云端下载所选日期数据\n\n`+
+          `✅ 已从云端下载所选日期数据\n\n`+
           `📅 日期：${dateStr}\n`+
           `🆔 文档ID：${docId}\n`+
-          `📦 恢复字段：${Object.keys(payload).length} 个\n`+
+          `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
           `💾 数据大小：${dataSizeBytes} 字节 (${dataSizeKB} KB)\n`+
-          `🔄 localStorage 键数：${beforeKeys} → ${afterKeys}\n`+
-          `⏱️ 用时：${__download_end_time - __download_start_time}ms\n`+
-          `⏰ 下载时间：${downloadTime}\n\n`+
-          `✅ UI已刷新：所有分数、评级、图表均已更新\n`+
-          `💡 数据已同时保存到本地 IndexedDB`,
+          `🔄 下载前localStorage键数：${beforeKeys}\n`+
+          `⏰ 下载时间：${downloadTime}`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -31401,8 +33652,44 @@ async function loadTodaysData() {
             let snapshot = null;
             try {
               if (typeof cloudData === 'string') {
-                snapshot = JSON.parse(cloudData);
-                console.log('✅ [云端同步] 数据解析成功:', snapshot);
+                const parsed = JSON.parse(cloudData);
+                // ✅ 支持压缩包装格式（tpi_cloud_v3）
+                if (parsed && typeof parsed === 'object' && (parsed.schema === 'tpi_cloud_v3' || parsed.schema === 'tpi_cloud_v2')) {
+                  const payload = parsed.payload;
+                  let jsonStr = null;
+                  if (parsed.compressed && window.TPIDataCompression && typeof window.TPIDataCompression.decompressString === 'function') {
+                    jsonStr = window.TPIDataCompression.decompressString(payload);
+                  } else {
+                    jsonStr = (typeof payload === 'string') ? payload : JSON.stringify(payload || {});
+                  }
+                  try {
+                    snapshot = JSON.parse(jsonStr);
+                  } catch(e) {
+                    console.warn('⚠️ [云端同步] 解包后仍无法解析，尝试降级解析:', e);
+                    snapshot = parsed.data || parsed;
+                  }
+
+                  // ✅ 校验和检查（弱校验，避免误报阻断）
+                  try{
+                    function __tpi_fnv1a32(str){
+                      let h = 0x811c9dc5;
+                      for (let i=0;i<str.length;i++){
+                        h ^= str.charCodeAt(i);
+                        h = (h + ((h<<1) + (h<<4) + (h<<7) + (h<<8) + (h<<24))) >>> 0;
+                      }
+                      return ('00000000' + h.toString(16)).slice(-8);
+                    }
+                    const raw = JSON.stringify(snapshot || {});
+                    const got = __tpi_fnv1a32(raw);
+                    if (parsed.checksum && got !== String(parsed.checksum)) {
+                      console.warn('⚠️ [云端同步] 校验和不一致：可能数据被截断/损坏', {expected: parsed.checksum, got});
+                    }
+                  }catch(e){}
+                  console.log('✅ [云端同步] 解包成功:', {schema: parsed.schema, changedKeys: (parsed.changedKeys||[]).slice(0,10), compressed: !!parsed.compressed});
+                } else {
+                  snapshot = parsed;
+                  console.log('✅ [云端同步] 数据解析成功:', snapshot);
+                }
               } else if (typeof cloudData === 'object') {
                 // 兼容旧格式：如果是对象直接使用
                 snapshot = cloudData.data || cloudData;
@@ -31502,9 +33789,62 @@ async function saveTodaysData() {
     }
 
     // 🔥 保障1：数据序列化为字符串（确保Appwrite正确存储）
+// ✅ 优化：压缩传输 + 校验和 + 变更字段列表（不改变后端 schema：仍写入 data 字符串）
+    function __tpi_fnv1a32(str){
+      try{
+        let h = 0x811c9dc5;
+        for (let i=0;i<str.length;i++){
+          h ^= str.charCodeAt(i);
+          h = (h + ((h<<1) + (h<<4) + (h<<7) + (h<<8) + (h<<24))) >>> 0;
+        }
+        return ('00000000' + h.toString(16)).slice(-8);
+      }catch(e){ return String(Date.now()); }
+    }
+
+    let changedKeys = [];
+    try{
+      const prevRaw = __tpi_ls_get('tpi_last_snapshot_' + today);
+      if (prevRaw) {
+        const prevObj = JSON.parse(prevRaw);
+        if (window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function') {
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshot);
+          if (diffObj && typeof diffObj === 'object') changedKeys = Object.keys(diffObj);
+        } else {
+          // 兜底：浅比较
+          Object.keys(snapshot||{}).forEach(k=>{ try{ if (JSON.stringify(prevObj?.[k]) !== JSON.stringify(snapshot[k])) changedKeys.push(k); }catch(_){ changedKeys.push(k); } });
+        }
+      } else {
+        changedKeys = Object.keys(snapshot||{});
+      }
+    }catch(e){ changedKeys = Object.keys(snapshot||{}); }
+
+    const rawJson = JSON.stringify(snapshot);
+    const checksum = __tpi_fnv1a32(rawJson);
+
+    let compressed = null;
+    try{
+      if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+        compressed = window.TPIDataCompression.compressString(rawJson);
+      }
+    }catch(e){ compressed = null; }
+
+    const wrapper = {
+      schema: 'tpi_cloud_v3',
+      date: today,
+      updatedAt: new Date().toISOString(),
+      deviceId: (window.TPIConflictResolver && typeof window.TPIConflictResolver.getDeviceId === 'function') ? window.TPIConflictResolver.getDeviceId() : (__tpi_ls_get('tpi_device_id') || ''),
+      changedKeys: changedKeys.slice(0, 300),
+      checksum: checksum,
+      compressed: !!compressed,
+      payload: compressed ? compressed : rawJson
+    };
+
+    // 保存本地快照用于下次变更检测（仅本地，不上传敏感字段）
+    try{ __tpi_ls_set('tpi_last_snapshot_' + today, rawJson); }catch(e){}
+
     const dataToSave = {
         date: today,
-        data: JSON.stringify(snapshot)
+        data: JSON.stringify(wrapper)
     };
     
     console.log('💾 [云端同步] 准备保存的数据结构:', {
@@ -31632,50 +33972,7 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
 })();
 
 
-// ========== Appwrite 集成区 (请在此处粘贴) ==========
 
-// 1. 初始化客户端 (替换为你的真实ID)
-var client = window.__appwriteClient || (window.__appwriteClient = new Appwrite.Client());
-  client.setEndpoint(APPWRITE_ENDPOINT)
-  .setProject('698d998e003c903490e1'); // ← 必须替换!
-
-var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
-var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
-const DB_ID = 'tpi_database';
-const COL_ID = 'daily_records';
-
-// 2. 页面加载时检查登录状态
-window.addEventListener('DOMContentLoaded', async () => {
-  try {
-    await account.get(); // 尝试获取当前用户
-    showMainInterface();
-  } catch {
-    showAuthInterface();
-  }
-});
-
-// 3. 绑定登录/注册事件
-document.getElementById('login-btn')?.addEventListener('click', handleLogin);
-document.getElementById('register-btn')?.addEventListener('click', handleRegister);
-document.getElementById('logout-btn')?.addEventListener('click', handleLogout);
-
-// 4. 绑定保存事件
-document.getElementById('save-to-cloud-btn')?.addEventListener('click', saveTodaysData);
-
-// 5. 实现核心函数 (此处省略具体实现，但需包含 create/update document 逻辑)
-async function handleLogin() { /* ... */ }
-async function handleRegister() { /* ... */ }
-async function handleLogout() { /* ... */ }
-async function saveTodaysData() { 
-  // 关键：遍历所有输入框，构建 data 对象
-  // 调用 databases.createDocument 或 updateDocument
-}
-function showMainInterface() { /* 切换显示主界面 */ }
-function showAuthInterface() { /* 切换显示登录界面 */ }
-
-// ========== Appwrite 集成区结束 ==========
-
-<script>
 
 /* ===========================
    TPI 深度优化脚本 v1.0 (增强版 - 不覆盖现有功能)
@@ -31692,37 +33989,61 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
   // 1. localStorage 数据压缩模块
   // ===========================
   window.TPIDataCompression = {
-    // 简单的压缩函数 (使用 LZ-String 思想的简化版)
-    compress: function(data) {
-      try {
-        const jsonStr = JSON.stringify(data);
-        // 使用 btoa 进行基本编码 (实际项目中应使用 LZ-String 库)
-        return btoa(encodeURIComponent(jsonStr));
-      } catch (e) {
-        console.warn('⚠️ [压缩] 压缩失败，使用原始数据:', e);
-        return JSON.stringify(data);
-      }
-    },
-    
-    decompress: function(compressed) {
-      try {
-        // 尝试解压
-        const jsonStr = decodeURIComponent(atob(compressed));
-        return JSON.parse(jsonStr);
-      } catch (e) {
-        // 如果解压失败，尝试直接解析(可能是未压缩的数据)
-        try {
-          return JSON.parse(compressed);
-        } catch (e2) {
-          console.error('❌ [压缩] 解压失败:', e, e2);
-          return null;
+    // ✅ 数据压缩：优先使用 lz-string（体积更小），否则降级到 btoa/base64
+    compressString: function(str){
+      try{
+        if (window.LZString && typeof window.LZString.compressToUTF16 === 'function') {
+          return { algo:'lzutf16', payload: window.LZString.compressToUTF16(String(str||'')) };
         }
+      }catch(e){}
+      try{
+        return { algo:'b64uri', payload: btoa(encodeURIComponent(String(str||''))) };
+      }catch(e){
+        return { algo:'plain', payload: String(str||'') };
       }
     },
-    
-    // 计算压缩率
-    getCompressionRatio: function(original, compressed) {
-      return ((1 - compressed.length / original.length) * 100).toFixed(2) + '%';
+    decompressString: function(objOrStr){
+      try{
+        if (objOrStr && typeof objOrStr === 'object' && objOrStr.algo && objOrStr.payload != null){
+          const algo = objOrStr.algo;
+          const payload = objOrStr.payload;
+          if (algo === 'lzutf16' && window.LZString && typeof window.LZString.decompressFromUTF16 === 'function'){
+            return window.LZString.decompressFromUTF16(String(payload||'')) || '';
+          }
+          if (algo === 'b64uri'){
+            return decodeURIComponent(atob(String(payload||'')));
+          }
+          if (algo === 'plain'){
+            return String(payload||'');
+          }
+        }
+      }catch(e){}
+      // 兼容旧格式：直接把字符串当作 b64uri 或 json
+      try{ return decodeURIComponent(atob(String(objOrStr||''))); }catch(e){}
+      return String(objOrStr||'');
+    },
+    compress: function(data){
+      const jsonStr = JSON.stringify(data);
+      return this.compressString(jsonStr);
+    },
+    decompress: function(comp){
+      try{
+        const jsonStr = this.decompressString(comp);
+        return JSON.parse(jsonStr);
+      }catch(e){
+        try{
+          if (typeof comp === 'string') return JSON.parse(comp);
+        }catch(_){}
+        return null;
+      }
+    },
+    getCompressionRatio: function(originalStr, compressedPayload){
+      try{
+        const o = String(originalStr||'');
+        const c = (typeof compressedPayload === 'string') ? compressedPayload : JSON.stringify(compressedPayload||'');
+        if (!o.length) return '0%';
+        return ((1 - c.length / o.length) * 100).toFixed(2) + '%';
+      }catch(e){ return '0%'; }
     }
   };
 
@@ -31933,13 +34254,22 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
     },
     
     addToQueue: function(operation) {
+      const now = Date.now();
+      const op = (operation && typeof operation === 'object') ? operation : { type: 'unknown' };
+      const priority = (typeof op.priority === 'number') ? op.priority : 0;
+      const ttlDays = (typeof op.ttlDays === 'number' && op.ttlDays > 0) ? op.ttlDays : 7;
+      const expiresAt = op.expiresAt || (now + ttlDays * 24 * 60 * 60 * 1000);
       this.syncQueue.push({
-        ...operation,
-        timestamp: Date.now(),
-        id: Date.now() + Math.random()
+        ...op,
+        priority,
+        expiresAt,
+        timestamp: now,
+        id: now + Math.random()
       });
+      // 高优先级任务前置
+      this.syncQueue.sort((a,b)=> (b.priority||0) - (a.priority||0) || (a.timestamp||0)-(b.timestamp||0));
       this.saveSyncQueue();
-      console.log('📦 [网络监控] 操作已加入同步队列');
+      console.log('📦 [网络监控] 操作已加入同步队列', {type: op.type, priority, expiresAt});
     },
     
     saveSyncQueue: function() {
@@ -31954,11 +34284,33 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
       try {
         const queue = __tpi_ls_get('tpi_sync_queue');
         if (queue) {
-          this.syncQueue = JSON.parse(queue);
+          this.syncQueue = JSON.parse(queue) || [];
+          // 兼容旧队列项：补齐 priority/expiresAt
+          const now = Date.now();
+          this.syncQueue = (this.syncQueue || []).map(it => {
+            if (!it || typeof it !== 'object') return null;
+            if (typeof it.priority !== 'number') it.priority = 0; // 0=普通，10=高优先
+            if (!it.expiresAt) it.expiresAt = (it.timestamp || now) + 7 * 24 * 60 * 60 * 1000; // 默认7天
+            return it;
+          }).filter(Boolean);
+          this.cleanupQueue();
           console.log(`📦 [网络监控] 加载了 ${this.syncQueue.length} 个待同步操作`);
         }
       } catch (e) {
         console.warn('⚠️ [网络监控] 加载同步队列失败:', e);
+      }
+    },
+
+    cleanupQueue: function() {
+      try{
+        const now = Date.now();
+        const before = this.syncQueue.length;
+        this.syncQueue = (this.syncQueue || []).filter(it => !it.expiresAt || it.expiresAt > now);
+        const removed = before - this.syncQueue.length;
+        if (removed > 0) console.log(`🧹 [网络监控] 已清理 ${removed} 个过期离线任务`);
+        this.saveSyncQueue();
+      }catch(e){
+        console.warn('⚠️ [网络监控] 清理队列失败:', e);
       }
     },
     
@@ -31974,7 +34326,20 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
       for (const item of queue) {
         try {
           console.log('📤 [网络监控] 处理队列项:', item);
-          // 实际的同步逻辑在这里
+          // ✅ 实际同步逻辑：尽量复用现有云端保存函数（不重构）
+// 约定：队列项可包含 {type:'save_today'|'save_date', date:'YYYY-MM-DD'}；否则默认保存当前日期
+          const total = queue.length;
+          const idx = queue.indexOf(item) + 1;
+          try{
+            if (window.tpiToast) window.tpiToast(`📤 离线队列同步中：${idx}/${total}（剩余 ${total-idx}）`, 'info');
+          }catch(e){}
+          if (item && item.type === 'save_date' && item.date && typeof window.saveDateData === 'function') {
+            await window.saveDateData(item.date);
+          } else if (typeof window.saveTodaysData === 'function') {
+            await window.saveTodaysData();
+          } else if (typeof saveTodaysData === 'function') {
+            await saveTodaysData();
+          }
         } catch (e) {
           console.error('❌ [网络监控] 同步失败:', e);
           // 失败的重新加入队列
@@ -32269,6 +34634,461 @@ function showAuthInterface() { /* 切换显示登录界面 */ }
 
 </script>
 
+
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
+
 </body>
 </html>
 
@@ -32558,903 +35378,463 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 console.log('✅ [TPI优化] 函数增强包装器已加载');
-
-// ==================== IndexedDB 存储系统 (替代 localStorage) ====================
-/* =========================================================
-   IndexedDB 存储系统
-   优势：
-   1. 存储容量大（几百MB - GB）vs localStorage (5-10MB)
-   2. 支持事务，数据完整性更好
-   3. 异步操作，不阻塞 UI
-   4. 支持离线队列
-========================================================= */
-(function(){
-  'use strict';
-
-  const IDB_NAME = 'TPI_Storage';
-  const IDB_VERSION = 1;
-  const IDB_STORE_DATA = 'tpi_data';
-  const IDB_STORE_QUEUE = 'sync_queue';
-  const IDB_STORE_CONFIG = 'config';
-
-  let dbInstance = null;
-
-  // 打开/创建数据库
-  async function openDB() {
-    if (dbInstance) return dbInstance;
-
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(IDB_NAME, IDB_VERSION);
-
-      request.onerror = () => {
-        console.error('❌ [IndexedDB] 打开失败:', request.error);
-        reject(request.error);
-      };
-
-      request.onsuccess = () => {
-        dbInstance = request.result;
-        console.log('✅ [IndexedDB] 数据库已打开');
-        resolve(dbInstance);
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        console.log('🔧 [IndexedDB] 正在创建数据库结构...');
-
-        // 主数据存储（按日期存储）
-        if (!db.objectStoreNames.contains(IDB_STORE_DATA)) {
-          const dataStore = db.createObjectStore(IDB_STORE_DATA, { keyPath: 'date' });
-          dataStore.createIndex('timestamp', 'timestamp', { unique: false });
-          dataStore.createIndex('synced_appwrite', 'synced_appwrite', { unique: false });
-          dataStore.createIndex('synced_gist', 'synced_gist', { unique: false });
-        }
-
-        // 同步队列（离线时排队）
-        if (!db.objectStoreNames.contains(IDB_STORE_QUEUE)) {
-          const queueStore = db.createObjectStore(IDB_STORE_QUEUE, { keyPath: 'id', autoIncrement: true });
-          queueStore.createIndex('type', 'type', { unique: false }); // 'appwrite' 或 'gist'
-          queueStore.createIndex('date', 'date', { unique: false });
-          queueStore.createIndex('retries', 'retries', { unique: false });
-        }
-
-        // 配置存储（Token、设置等）
-        if (!db.objectStoreNames.contains(IDB_STORE_CONFIG)) {
-          db.createObjectStore(IDB_STORE_CONFIG, { keyPath: 'key' });
-        }
-
-        console.log('✅ [IndexedDB] 数据库结构创建完成');
-      };
-    });
-  }
-
-  // ========== 数据存储函数 ==========
-  
-  // 保存数据
-  async function idbSaveData(date, data, metadata = {}) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_DATA], 'readwrite');
-      const store = tx.objectStore(IDB_STORE_DATA);
-
-      const record = {
-        date: date,
-        data: data,
-        timestamp: Date.now(),
-        synced_appwrite: metadata.synced_appwrite || false,
-        synced_gist: metadata.synced_gist || false,
-        last_modified: new Date().toISOString()
-      };
-
-      await store.put(record);
-      
-      return new Promise((resolve, reject) => {
-        tx.oncomplete = () => {
-          console.log(`✅ [IndexedDB] 已保存数据: ${date}`);
-          resolve(true);
-        };
-        tx.onerror = () => {
-          console.error('❌ [IndexedDB] 保存失败:', tx.error);
-          reject(tx.error);
-        };
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 保存数据异常:', error);
-      return false;
-    }
-  }
-
-  // 读取数据
-  async function idbGetData(date) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_DATA], 'readonly');
-      const store = tx.objectStore(IDB_STORE_DATA);
-      
-      return new Promise((resolve, reject) => {
-        const request = store.get(date);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 读取数据异常:', error);
-      return null;
-    }
-  }
-
-  // 获取所有日期
-  async function idbGetAllDates() {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_DATA], 'readonly');
-      const store = tx.objectStore(IDB_STORE_DATA);
-      
-      return new Promise((resolve, reject) => {
-        const request = store.getAllKeys();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 读取日期列表异常:', error);
-      return [];
-    }
-  }
-
-  // ========== 同步队列函数 ==========
-  
-  // 添加到同步队列
-  async function idbAddToQueue(type, date, data) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_QUEUE], 'readwrite');
-      const store = tx.objectStore(IDB_STORE_QUEUE);
-
-      const queueItem = {
-        type: type, // 'appwrite' 或 'gist'
-        date: date,
-        data: data,
-        timestamp: Date.now(),
-        retries: 0,
-        status: 'pending'
-      };
-
-      await store.add(queueItem);
-      
-      return new Promise((resolve, reject) => {
-        tx.oncomplete = () => {
-          console.log(`📥 [IndexedDB] 已加入${type}同步队列: ${date}`);
-          resolve(true);
-        };
-        tx.onerror = () => reject(tx.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 加入队列失败:', error);
-      return false;
-    }
-  }
-
-  // 获取待同步队列
-  async function idbGetQueue(type = null) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_QUEUE], 'readonly');
-      const store = tx.objectStore(IDB_STORE_QUEUE);
-      
-      return new Promise((resolve, reject) => {
-        const request = type ? store.index('type').getAll(type) : store.getAll();
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 读取队列失败:', error);
-      return [];
-    }
-  }
-
-  // 删除队列项
-  async function idbRemoveFromQueue(id) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_QUEUE], 'readwrite');
-      const store = tx.objectStore(IDB_STORE_QUEUE);
-      
-      await store.delete(id);
-      
-      return new Promise((resolve, reject) => {
-        tx.oncomplete = () => {
-          console.log(`✅ [IndexedDB] 已从队列移除: ID ${id}`);
-          resolve(true);
-        };
-        tx.onerror = () => reject(tx.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 删除队列项失败:', error);
-      return false;
-    }
-  }
-
-  // ========== 配置存储函数 ==========
-  
-  // 保存配置
-  async function idbSetConfig(key, value) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_CONFIG], 'readwrite');
-      const store = tx.objectStore(IDB_STORE_CONFIG);
-
-      await store.put({ key: key, value: value, timestamp: Date.now() });
-      
-      return new Promise((resolve, reject) => {
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = () => reject(tx.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 保存配置失败:', error);
-      // 降级到 localStorage
-      try {
-        if (typeof window.__tpi_ls_set === 'function') {
-          window.__tpi_ls_set(key, typeof value === 'string' ? value : JSON.stringify(value));
-        }
-      } catch (e) {}
-      return false;
-    }
-  }
-
-  // 读取配置
-  async function idbGetConfig(key, defaultValue = null) {
-    try {
-      const db = await openDB();
-      const tx = db.transaction([IDB_STORE_CONFIG], 'readonly');
-      const store = tx.objectStore(IDB_STORE_CONFIG);
-      
-      return new Promise((resolve, reject) => {
-        const request = store.get(key);
-        request.onsuccess = () => {
-          const result = request.result;
-          resolve(result ? result.value : defaultValue);
-        };
-        request.onerror = () => reject(request.error);
-      });
-    } catch (error) {
-      console.error('❌ [IndexedDB] 读取配置失败:', error);
-      // 降级到 localStorage
-      try {
-        if (typeof window.__tpi_ls_get === 'function') {
-          const val = window.__tpi_ls_get(key, null);
-          return val !== null ? val : defaultValue;
-        }
-      } catch (e) {}
-      return defaultValue;
-    }
-  }
-
-  // ========== 导出到全局 ==========
-  window.TPIIndexedDB = {
-    saveData: idbSaveData,
-    getData: idbGetData,
-    getAllDates: idbGetAllDates,
-    addToQueue: idbAddToQueue,
-    getQueue: idbGetQueue,
-    removeFromQueue: idbRemoveFromQueue,
-    setConfig: idbSetConfig,
-    getConfig: idbGetConfig,
-    openDB: openDB
-  };
-
-  // 初始化数据库
-  openDB().then(() => {
-    console.log('✅ [IndexedDB] 存储系统已就绪');
-  }).catch(error => {
-    console.error('❌ [IndexedDB] 初始化失败，将使用 localStorage 降级:', error);
-  });
-
-  console.log('✅ [IndexedDB] 存储模块已加载');
-})();
-
-// ==================== GitHub Gist 备份系统 (方案B: 主备模式) ====================
-/* =========================================================
-   GitHub Gist 备份系统
-   作用：作为 Appwrite 的补充备份方案
-   模式：主备模式（Appwrite 为主，Gist 为备份）
-   功能：
-   1. 手动备份当前数据到 Gist
-   2. 从 Gist 恢复数据
-   3. 可选的每日自动备份（23:00）
-========================================================= */
-(function(){
-  'use strict';
-
-  // ========== 工具函数 ==========
-  const $ = (id) => document.getElementById(id);
-  
-  // 使用 IndexedDB（优先）或 localStorage（降级）
-  const getConfig = async (k, d) => {
-    if (window.TPIIndexedDB && window.TPIIndexedDB.getConfig) {
-      return await window.TPIIndexedDB.getConfig(k, d);
-    }
-    return (typeof window.__tpi_ls_get === 'function') ? 
-      window.__tpi_ls_get(k, d) : (localStorage.getItem(k) ?? d ?? null);
-  };
-  
-  const setConfig = async (k, v) => {
-    if (window.TPIIndexedDB && window.TPIIndexedDB.setConfig) {
-      return await window.TPIIndexedDB.setConfig(k, v);
-    }
-    return (typeof window.__tpi_ls_set === 'function') ? 
-      window.__tpi_ls_set(k, v) : (localStorage.setItem(k, v), true);
-  };
-
-  // ========== Gist 配置（硬编码）==========
-  const GIST_ID_HARDCODED = 'cab132a91b77c44ff7a66286a54c213d'; // 硬编码的 Gist ID
-  const GIST_TOKEN_KEY = 'tpi_gist_token';
-  const GIST_ID_KEY = 'tpi_gist_id';
-  const GIST_AUTO_BACKUP_KEY = 'tpi_gist_auto_backup';
-  const GIST_FILENAME = 'tpi-backup-data.json';
-
-  // ========== IndexedDB 配置 ==========
-  const IDB_NAME = 'TPI_Storage';
-  const IDB_VERSION = 1;
-  const IDB_STORE_DATA = 'tpi_data'; // 主数据存储
-  const IDB_STORE_QUEUE = 'sync_queue'; // 同步队列
-  const IDB_STORE_CONFIG = 'config'; // 配置存储
-
-  let autoBackupTimer = null;
-
-  // 显示消息
-  function showGistMsg(text, isError) {
-    const msgEl = $('gist-backup-msg');
-    const statusEl = $('gist-backup-status');
-    
-    if (msgEl) {
-      msgEl.textContent = text || '';
-      msgEl.style.color = isError ? '#dc2626' : '#059669';
-    }
-    if (statusEl && !isError) {
-      statusEl.textContent = text || '';
-    }
-    
-    // Toast 提示
-    if (window.tpiToast) {
-      window.tpiToast(text, isError ? 'error' : 'success');
-    }
-  }
-
-  // 获取认证信息
-  async function getGistAuth() {
-    let token = $('gist-token') && $('gist-token').value ? 
-      $('gist-token').value.trim() : await getConfig(GIST_TOKEN_KEY, '');
-    
-    // 使用硬编码的 Gist ID
-    let gistId = GIST_ID_HARDCODED;
-    
-    if (!token) {
-      showGistMsg('⚠️ 请输入 GitHub Token', true);
-      if ($('gist-token')) $('gist-token').focus();
-      return null;
-    }
-
-    // 保存 token 到 IndexedDB
-    await setConfig(GIST_TOKEN_KEY, token);
-    
-    // 显示硬编码的 Gist ID（只读）
-    if ($('gist-id')) {
-      $('gist-id').value = gistId;
-      $('gist-id').disabled = true;
-      $('gist-id').title = '硬编码的 Gist ID（不可修改）';
-    }
-
-    console.log('✅ [Gist认证] 使用硬编码 Gist ID:', gistId);
-    return { token, gistId };
-  }
-
-  // 调用 GitHub API
-  async function callGistAPI(endpoint, method, token, body) {
-    const headers = {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json'
-    };
-
-    const options = {
-      method: method,
-      headers: headers
-    };
-
-    if (body) {
-      options.body = JSON.stringify(body);
-    }
-
-    const response = await fetch(endpoint, options);
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`GitHub API 错误 (${response.status}): ${errorText}`);
-    }
-
-    return await response.json();
-  }
-
-  // 收集当前数据（使用现有的 collectDailyData 函数）
-  function collectCurrentData() {
-    try {
-      // 优先使用页面已有的数据收集函数
-      if (typeof window.collectDailyData === 'function') {
-        return window.collectDailyData();
-      }
-      
-      // 备用：使用 _formState 函数
-      if (typeof window._formState === 'function') {
-        return window._formState();
-      }
-
-      throw new Error('找不到数据收集函数');
-    } catch (error) {
-      console.error('❌ [Gist备份] 数据收集失败:', error);
-      throw error;
-    }
-  }
-
-  // ========== 核心功能：备份到 Gist ==========
-  window.gistBackupNow = async function() {
-    try {
-      const startTime = Date.now();
-      showGistMsg('🔄 正在备份数据到 Gist...', false);
-
-      const auth = await getGistAuth();
-      if (!auth) return;
-
-      // 收集当前数据
-      const currentData = collectCurrentData();
-      const date = $('date-input') ? $('date-input').value : new Date().toISOString().split('T')[0];
-      
-      // 统计数据信息
-      const dataSize = JSON.stringify(currentData).length;
-      const fieldCount = Object.keys(currentData).length;
-      
-      console.log(`📊 [Gist备份] 准备备份: ${date}, 字段数: ${fieldCount}, 大小: ${(dataSize/1024).toFixed(2)}KB`);
-      
-      // 准备备份数据（包含所有日期的数据）
-      let allBackupData = {};
-      
-      // 如果有 Gist ID，先获取现有数据
-      if (auth.gistId) {
-        try {
-          showGistMsg('🔄 正在从 Gist 获取现有数据...', false);
-          const existingGist = await callGistAPI(
-            `https://api.github.com/gists/${auth.gistId}`,
-            'GET',
-            auth.token
-          );
-          
-          if (existingGist.files && existingGist.files[GIST_FILENAME]) {
-            const content = existingGist.files[GIST_FILENAME].content;
-            allBackupData = JSON.parse(content);
-            console.log(`📥 [Gist备份] 已获取现有数据，包含 ${Object.keys(allBackupData).length} 天记录`);
-          }
-        } catch (error) {
-          console.warn('⚠️ [Gist备份] 获取现有数据失败，将创建新备份:', error);
-        }
-      }
-
-      // 更新当前日期的数据
-      allBackupData[date] = {
-        data: currentData,
-        timestamp: Date.now(),
-        backupTime: new Date().toISOString(),
-        source: 'TPI-Appwrite-Gist-Dual-Backup',
-        dataSize: dataSize,
-        fieldCount: fieldCount
-      };
-
-      // 准备 Gist payload
-      const gistPayload = {
-        description: 'TPI 效能管理系统 - 数据备份 (自动生成)',
-        public: false, // Secret Gist
-        files: {
-          [GIST_FILENAME]: {
-            content: JSON.stringify(allBackupData, null, 2)
-          }
-        }
-      };
-
-      let result;
-      const totalDays = Object.keys(allBackupData).length;
-      
-      try {
-        if (auth.gistId) {
-          // 更新现有 Gist
-          showGistMsg('🔄 正在更新到 Gist...', false);
-          result = await callGistAPI(
-            `https://api.github.com/gists/${auth.gistId}`,
-            'PATCH',
-            auth.token,
-            gistPayload
-          );
-        } else {
-          // 创建新 Gist（理论上不会执行，因为已硬编码）
-          showGistMsg('🔄 正在创建新 Gist...', false);
-          result = await callGistAPI(
-            'https://api.github.com/gists',
-            'POST',
-            auth.token,
-            gistPayload
-          );
-        }
-
-        // 标记为已同步到 Gist
-        if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
-          await window.TPIIndexedDB.saveData(date, currentData, { synced_gist: true });
-        }
-
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-        
-        showGistMsg(
-          `✅ 备份成功！\n` +
-          `📅 日期: ${date}\n` +
-          `📊 字段数: ${fieldCount} | 大小: ${(dataSize/1024).toFixed(2)}KB\n` +
-          `📚 总天数: ${totalDays} 天\n` +
-          `⏱️ 用时: ${duration}秒\n` +
-          `🔗 Gist ID: ${auth.gistId}`,
-          false
-        );
-
-        // 更新状态显示
-        const statusEl = $('gist-backup-status');
-        if (statusEl) {
-          const now = new Date();
-          statusEl.textContent = 
-            `📝 最后备份: ${now.toLocaleString('zh-CN')} | ` +
-            `共 ${totalDays} 天数据 | ` +
-            `本次: ${(dataSize/1024).toFixed(2)}KB`;
-        }
-
-        console.log('✅ [Gist备份] 备份完成:', result.html_url);
-
-      } catch (uploadError) {
-        // 上传失败，加入离线队列
-        console.error('❌ [Gist备份] 上传失败，加入离线队列:', uploadError);
-        
-        if (window.TPIIndexedDB && window.TPIIndexedDB.addToQueue) {
-          await window.TPIIndexedDB.addToQueue('gist', date, currentData);
-          showGistMsg(
-            `⚠️ 网络错误，已加入离线队列\n` +
-            `💾 数据已保存到本地 IndexedDB\n` +
-            `🔄 联网后将自动重试上传`,
-            true
-          );
-        } else {
-          throw uploadError;
-        }
-      }
-
-    } catch (error) {
-      console.error('❌ [Gist备份] 备份失败:', error);
-      showGistMsg(
-        `❌ 备份失败\n` +
-        `错误: ${error.message}\n` +
-        `请检查 Token 是否有效，网络是否正常`,
-        true
-      );
-    }
-  };
-
-  // ========== 核心功能：从 Gist 恢复 ==========
-  window.gistRestoreData = async function() {
-    try {
-      const startTime = Date.now();
-      const auth = await getGistAuth();
-      if (!auth) return;
-
-      if (!auth.gistId) {
-        showGistMsg('⚠️ Gist ID 未配置（应该已硬编码）', true);
-        return;
-      }
-
-      showGistMsg('🔄 正在从 Gist 恢复数据...', false);
-
-      // 获取 Gist 数据
-      const gist = await callGistAPI(
-        `https://api.github.com/gists/${auth.gistId}`,
-        'GET',
-        auth.token
-      );
-
-      if (!gist.files || !gist.files[GIST_FILENAME]) {
-        showGistMsg('⚠️ Gist 中没有找到备份数据', true);
-        return;
-      }
-
-      // 解析备份数据
-      const backupData = JSON.parse(gist.files[GIST_FILENAME].content);
-      const totalDates = Object.keys(backupData).length;
-      const date = $('date-input') ? $('date-input').value : new Date().toISOString().split('T')[0];
-
-      console.log(`📥 [Gist恢复] Gist 包含 ${totalDates} 天数据`);
-
-      if (!backupData[date]) {
-        const availableDates = Object.keys(backupData).sort().reverse();
-        showGistMsg(
-          `⚠️ 未找到 ${date} 的备份数据\n\n` +
-          `📚 可用日期 (共${totalDates}天):\n` +
-          `${availableDates.slice(0, 10).join('\n')}` +
-          `${totalDates > 10 ? '\n...' : ''}`,
-          true
-        );
-        return;
-      }
-
-      // 恢复数据到页面
-      const dateData = backupData[date].data;
-      const backupInfo = backupData[date];
-      const fieldCount = Object.keys(dateData).length;
-      const dataSize = JSON.stringify(dateData).length;
-
-      showGistMsg('🔄 正在应用数据到页面...', false);
-      
-      // 使用现有的数据恢复函数
-      if (typeof window.restoreUIFromData === 'function') {
-        window.restoreUIFromData(dateData);
-      } else if (typeof window.applyFormState === 'function') {
-        window.applyFormState(dateData);
-      } else {
-        throw new Error('找不到数据恢复函数');
-      }
-
-      // 触发重新计算
-      if (typeof window.__tpi_triggerRecalc === 'function') {
-        window.__tpi_triggerRecalc();
-      }
-
-      // 保存到 IndexedDB
-      if (window.TPIIndexedDB && window.TPIIndexedDB.saveData) {
-        await window.TPIIndexedDB.saveData(date, dateData, { synced_gist: true });
-      }
-
-      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      const backupTime = new Date(backupInfo.backupTime).toLocaleString('zh-CN');
-
-      showGistMsg(
-        `✅ 恢复成功！\n` +
-        `📅 日期: ${date}\n` +
-        `📊 字段数: ${fieldCount} | 大小: ${(dataSize/1024).toFixed(2)}KB\n` +
-        `🕐 备份时间: ${backupTime}\n` +
-        `⏱️ 用时: ${duration}秒\n` +
-        `📚 Gist 总数据: ${totalDates} 天`,
-        false
-      );
-
-      console.log('✅ [Gist恢复] 数据恢复完成');
-
-    } catch (error) {
-      console.error('❌ [Gist恢复] 恢复失败:', error);
-      showGistMsg(
-        `❌ 恢复失败\n` +
-        `错误: ${error.message}\n` +
-        `请检查 Token 是否有效，Gist ID 是否正确`,
-        true
-      );
-    }
-  };
-
-  // ========== 自动备份功能 ==========
-  window.toggleGistAutoBackup = async function(enabled) {
-    await setConfig(GIST_AUTO_BACKUP_KEY, enabled ? '1' : '0');
-    
-    if (autoBackupTimer) {
-      clearInterval(autoBackupTimer);
-      autoBackupTimer = null;
-    }
-
-    if (enabled) {
-      showGistMsg('✅ 已启用每日自动备份 (23:00)', false);
-      
-      // 每分钟检查一次是否到了 23:00
-      autoBackupTimer = setInterval(() => {
-        const now = new Date();
-        if (now.getHours() === 23 && now.getMinutes() === 0) {
-          console.log('🕐 [Gist自动备份] 触发每日备份');
-          window.gistBackupNow();
-        }
-      }, 60000); // 每分钟检查一次
-      
-    } else {
-      showGistMsg('ℹ️ 已关闭自动备份', false);
-    }
-  };
-
-  // ========== 离线队列处理器 ==========
-  async function processOfflineQueue() {
-    if (!window.TPIIndexedDB) return;
-
-    try {
-      const queue = await window.TPIIndexedDB.getQueue('gist');
-      if (queue.length === 0) return;
-
-      console.log(`🔄 [离线队列] 发现 ${queue.length} 个待同步的 Gist 任务`);
-
-      for (const item of queue) {
-        try {
-          const auth = await getGistAuth();
-          if (!auth) break;
-
-          console.log(`📤 [离线队列] 正在同步: ${item.date}`);
-
-          // 执行备份（使用队列中的数据）
-          const allBackupData = {};
-          
-          // 获取现有数据
-          const existingGist = await callGistAPI(
-            `https://api.github.com/gists/${auth.gistId}`,
-            'GET',
-            auth.token
-          );
-          
-          if (existingGist.files && existingGist.files[GIST_FILENAME]) {
-            Object.assign(allBackupData, JSON.parse(existingGist.files[GIST_FILENAME].content));
-          }
-
-          // 添加队列中的数据
-          allBackupData[item.date] = {
-            data: item.data,
-            timestamp: Date.now(),
-            backupTime: new Date().toISOString(),
-            source: 'TPI-Offline-Queue'
-          };
-
-          // 上传
-          await callGistAPI(
-            `https://api.github.com/gists/${auth.gistId}`,
-            'PATCH',
-            auth.token,
-            {
-              files: {
-                [GIST_FILENAME]: {
-                  content: JSON.stringify(allBackupData, null, 2)
-                }
-              }
-            }
-          );
-
-          // 从队列中移除
-          await window.TPIIndexedDB.removeFromQueue(item.id);
-          console.log(`✅ [离线队列] 已同步: ${item.date}`);
-
-        } catch (error) {
-          console.error(`❌ [离线队列] 同步失败: ${item.date}`, error);
-          // 保留在队列中，下次再试
-        }
-      }
-
-      if (queue.length > 0) {
-        showGistMsg(`✅ 已处理离线队列，成功同步部分数据`, false);
-      }
-
-    } catch (error) {
-      console.error('❌ [离线队列] 处理失败:', error);
-    }
-  }
-
-  // ========== 页面加载时初始化 ==========
-  window.addEventListener('DOMContentLoaded', async function() {
-    console.log('🔧 [Gist备份] 初始化备份系统');
-
-    // 恢复保存的 Token（从 IndexedDB）
-    const savedToken = await getConfig(GIST_TOKEN_KEY, '');
-    
-    if (savedToken && $('gist-token')) {
-      $('gist-token').value = savedToken;
-    }
-
-    // 显示硬编码的 Gist ID
-    if ($('gist-id')) {
-      $('gist-id').value = GIST_ID_HARDCODED;
-      $('gist-id').disabled = true;
-      $('gist-id').style.backgroundColor = '#f3f4f6';
-      $('gist-id').title = '硬编码的 Gist ID（不可修改）';
-    }
-
-    // 恢复自动备份设置
-    const autoBackupEnabled = await getConfig(GIST_AUTO_BACKUP_KEY, '0') === '1';
-    if ($('gist-auto-backup')) {
-      $('gist-auto-backup').checked = autoBackupEnabled;
-      if (autoBackupEnabled) {
-        window.toggleGistAutoBackup(true);
-      }
-    }
-
-    // 处理离线队列
-    setTimeout(() => {
-      processOfflineQueue();
-    }, 5000); // 延迟 5 秒后处理离线队列
-
-    // 监听网络恢复事件
-    window.addEventListener('online', () => {
-      console.log('🌐 [网络] 网络已恢复，处理离线队列');
-      showGistMsg('🌐 网络已恢复，正在同步离线数据...', false);
-      processOfflineQueue();
-    });
-
-    console.log('✅ [Gist备份] 备份系统已就绪');
-    console.log(`📌 [Gist备份] 使用硬编码 Gist ID: ${GIST_ID_HARDCODED}`);
-  });
-
-  // 暴露给控制台调试
-  window.TPIGistBackup = {
-    backup: window.gistBackupNow,
-    restore: window.gistRestoreData,
-    toggleAuto: window.toggleGistAutoBackup,
-    processQueue: processOfflineQueue
-  };
-
-  // ========== Service Worker 注册（用于离线支持）==========
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      // 创建内联 Service Worker
-      const swCode = `
-        self.addEventListener('install', (event) => {
-          console.log('✅ [ServiceWorker] 已安装');
-          self.skipWaiting();
-        });
-
-        self.addEventListener('activate', (event) => {
-          console.log('✅ [ServiceWorker] 已激活');
-          event.waitUntil(self.clients.claim());
-        });
-
-        self.addEventListener('fetch', (event) => {
-          // 对于 Appwrite 和 GitHub API 请求，如果离线则标记失败
-          const url = event.request.url;
-          if (url.includes('appwrite.io') || url.includes('api.github.com')) {
-            event.respondWith(
-              fetch(event.request).catch(error => {
-                console.log('❌ [ServiceWorker] 网络请求失败（离线）:', url);
-                return new Response(JSON.stringify({ 
-                  error: 'offline',
-                  message: '当前离线，请稍后重试'
-                }), {
-                  status: 503,
-                  headers: { 'Content-Type': 'application/json' }
-                });
-              })
-            );
-          }
-        });
-      `;
-
-      // 创建 Blob URL 作为 Service Worker
-      try {
-        const blob = new Blob([swCode], { type: 'application/javascript' });
-        const swUrl = URL.createObjectURL(blob);
-
-        navigator.serviceWorker.register(swUrl).then(registration => {
-          console.log('✅ [ServiceWorker] 注册成功');
-          
-          // 监听更新
-          registration.onupdatefound = () => {
-            const installingWorker = registration.installing;
-            installingWorker.onstatechange = () => {
-              if (installingWorker.state === 'installed') {
-                if (navigator.serviceWorker.controller) {
-                  console.log('🔄 [ServiceWorker] 有新版本可用');
-                }
-              }
-            };
-          };
-        }).catch(error => {
-          console.warn('⚠️ [ServiceWorker] 注册失败:', error);
-        });
-      } catch (error) {
-        console.warn('⚠️ [ServiceWorker] 创建失败:', error);
-      }
-    });
-  } else {
-    console.log('ℹ️ [ServiceWorker] 浏览器不支持 Service Worker');
-  }
-
-  console.log('✅ [Gist备份] 备份模块已加载');
-})();
-
 </script>
 
+
+
+<script>
+/* =========================================================
+   同步增强补丁 v7-sync-plus (无重构：仅包装/追加)
+   - 同步日志/统计图表
+   - 一键同步全部未同步日期
+   - 自动同步智能触发（夜间/网络质量/电量）
+========================================================= */
+(function(){
+  'use strict';
+  // ---------- helpers ----------
+  function lsGet(k){ try{ return (window.__tpi_ls_get? __tpi_ls_get(k): localStorage.getItem(k)); }catch(e){ return null; } }
+  function lsSet(k,v){ try{ return (window.__tpi_ls_set? __tpi_ls_set(k,v): localStorage.setItem(k,v)); }catch(e){ } }
+  function nowISO(){ try{ return new Date().toISOString(); }catch(e){ return ''; } }
+  function todayStr(){ try{ return (window.getTodayString? getTodayString(): new Date().toISOString().slice(0,10)); }catch(e){ return new Date().toISOString().slice(0,10); } }
+  function getSelectedDate(){ try{ return (window.__tpi_getSelectedDate? window.__tpi_getSelectedDate(): todayStr()); }catch(e){ return todayStr(); } }
+
+  // ---------- Sync Logger ----------
+  window.TPISyncLogger = window.TPISyncLogger || {
+    key: 'tpi_sync_logs',
+    max: 200,
+    add: function(entry){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        arr.unshift(Object.assign({ ts: Date.now(), iso: nowISO() }, entry||{}));
+        while(arr.length > this.max) arr.pop();
+        lsSet(this.key, JSON.stringify(arr));
+      }catch(e){}
+    },
+    list: function(limit){
+      try{
+        const arr = JSON.parse(lsGet(this.key) || '[]') || [];
+        return arr.slice(0, limit || 50);
+      }catch(e){ return []; }
+    }
+  };
+
+  // ---------- Auto trigger rules persistence ----------
+  const ruleKey = 'tpi_sync_rules_v1';
+  function loadRules(){
+    try{ return JSON.parse(lsGet(ruleKey)||'{}')||{}; }catch(e){ return {}; }
+  }
+  function saveRules(r){
+    try{ lsSet(ruleKey, JSON.stringify(r||{})); }catch(e){}
+  }
+  function isNight(){
+    const h = new Date().getHours();
+    return (h >= 22 || h < 7);
+  }
+  function isGoodNetwork(){
+    try{
+      if (!navigator.onLine) return false;
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (!c) return true; // 无法判断时放行
+      if (c.saveData) return false;
+      // 优先 type=wifi
+      if (c.type && String(c.type).toLowerCase() === 'wifi') return true;
+      // 否则按 effectiveType 估计
+      const et = (c.effectiveType||'').toLowerCase();
+      if (!et) return true;
+      return (et === '4g' || et === '5g');
+    }catch(e){ return true; }
+  }
+  async function isBatteryEnough(){
+    try{
+      if (!('getBattery' in navigator)) return true; // 不支持时放行
+      const bat = await navigator.getBattery();
+      if (!bat) return true;
+      // “电量充足”：>= 0.3 或正在充电
+      return !!bat.charging || (typeof bat.level === 'number' ? bat.level >= 0.3 : true);
+    }catch(e){ return true; }
+  }
+
+  // ---------- Build upload meta (for progress/logging) ----------
+  function buildUploadWrapperForCurrentSelection(){
+    try{
+      if (typeof window.collectDailyData !== 'function') return null;
+      const snapshotObj = window.collectDailyData() || {};
+      const rawJson = JSON.stringify(snapshotObj);
+      const checksum = (typeof window.__tpi_fnv1a32 === 'function') ? window.__tpi_fnv1a32(rawJson) : null;
+
+      let compressed = null;
+      try{
+        if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+          compressed = window.TPIDataCompression.compressString(rawJson);
+        }
+      }catch(e){ compressed = null; }
+
+      // changedKeys：若增量模块存在，使用其 diff，否则退化为全量 keys
+      let changedKeys = [];
+      try{
+        const prev = window.TPIIncrementalSync && typeof window.TPIIncrementalSync.getSnapshot === 'function' ? window.TPIIncrementalSync.getSnapshot() : null;
+        const prevObj = (prev && prev.data) ? prev.data : null;
+        if (prevObj && window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function'){
+          const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshotObj);
+          changedKeys = diffObj ? Object.keys(diffObj) : [];
+        } else {
+          changedKeys = Object.keys(snapshotObj||{});
+        }
+      }catch(e){ changedKeys = Object.keys(snapshotObj||{}); }
+
+      const wrapper = {
+        schema: 'tpi_cloud_v3',
+        date: getSelectedDate(),
+        updatedAt: nowISO(),
+        checksum: checksum,
+        changedKeys: changedKeys,
+        compressed: compressed,
+        rawSize: rawJson.length
+      };
+      return wrapper;
+    }catch(e){ return null; }
+  }
+
+  // ---------- Mark synced state ----------
+  function markSynced(dateStr, meta){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      lsSet(k, JSON.stringify(Object.assign({ date: dateStr, syncedAt: Date.now(), syncedAtISO: nowISO() }, meta||{})));
+    }catch(e){}
+  }
+  function getSyncedMeta(dateStr){
+    try{
+      const k = 'tpi_cloud_synced_' + dateStr;
+      return JSON.parse(lsGet(k) || 'null');
+    }catch(e){ return null; }
+  }
+
+  // ---------- UI rendering ----------
+  let _chartCount = null;
+  let _chartBytes = null;
+
+  function renderLogList(){
+    const el = document.getElementById('tpi-sync-log-list');
+    if (!el) return;
+    const list = window.TPISyncLogger.list(50);
+    if (!list.length){
+      el.innerHTML = '<div style="opacity:.7;">暂无同步日志</div>';
+      return;
+    }
+    el.innerHTML = list.map(it=>{
+      const t = it.iso || '';
+      const ok = (it.ok === false) ? '❌' : '✅';
+      const type = it.type || '';
+      const d = it.date ? (' | ' + it.date) : '';
+      const bytes = (typeof it.bytes === 'number') ? (' | ' + (it.bytes/1024).toFixed(1) + ' KB') : '';
+      const dur = (typeof it.durationMs === 'number') ? (' | ' + it.durationMs + ' ms') : '';
+      const extra = it.extra ? (' | ' + String(it.extra)) : '';
+      return `<div style="padding:6px 0; border-bottom:1px dashed #e5e7eb;">${ok} <b>${type}</b>${d}${bytes}${dur}${extra}<div style="opacity:.65;">${t}</div></div>`;
+    }).join('');
+  }
+
+  function buildLast30DaysSeries(logs){
+    const days = [];
+    const counts = [];
+    const bytes = [];
+    const map = new Map();
+    const mapB = new Map();
+
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      days.push(key.slice(5));
+      map.set(key, 0);
+      mapB.set(key, 0);
+    }
+    (logs||[]).forEach(it=>{
+      const day = (it.iso||'').slice(0,10);
+      if (!map.has(day)) return;
+      map.set(day, (map.get(day)||0) + 1);
+      mapB.set(day, (mapB.get(day)||0) + (typeof it.bytes === 'number' ? it.bytes : 0));
+    });
+    for (let i=29;i>=0;i--){
+      const d = new Date(Date.now() - i*24*60*60*1000);
+      const key = d.toISOString().slice(0,10);
+      counts.push(map.get(key)||0);
+      bytes.push(Math.round((mapB.get(key)||0)/1024));
+    }
+    return { labels: days, counts, bytes };
+  }
+
+  function renderCharts(){
+    const c1 = document.getElementById('tpi-sync-chart-count');
+    const c2 = document.getElementById('tpi-sync-chart-bytes');
+    if (!c1 || !c2) return;
+    if (typeof Chart === 'undefined') return;
+
+    const logs = window.TPISyncLogger.list(200);
+    const series = buildLast30DaysSeries(logs);
+
+    try{
+      if (_chartCount) { _chartCount.destroy(); _chartCount = null; }
+      if (_chartBytes) { _chartBytes.destroy(); _chartBytes = null; }
+    }catch(e){}
+
+    try{
+      _chartCount = new Chart(c1.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: '次数', data: series.counts, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+
+    try{
+      _chartBytes = new Chart(c2.getContext('2d'), {
+        type: 'line',
+        data: { labels: series.labels, datasets: [{ label: 'KB', data: series.bytes, tension: 0.25 }] },
+        options: { responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true } } }
+      });
+    }catch(e){}
+  }
+
+  function refreshStatsUI(){
+    renderLogList();
+    renderCharts();
+  }
+
+  function bindRuleUI(){
+    const r = loadRules();
+    const night = document.getElementById('tpi-auto-night');
+    const wifi = document.getElementById('tpi-auto-wifi');
+    const bat  = document.getElementById('tpi-auto-charging');
+    if (night) night.checked = !!r.nightOnly;
+    if (wifi) wifi.checked = !!r.wifiOnly;
+    if (bat)  bat.checked  = !!r.batteryOnly;
+
+    function onChange(){
+      const next = {
+        nightOnly: !!(night && night.checked),
+        wifiOnly: !!(wifi && wifi.checked),
+        batteryOnly: !!(bat && bat.checked)
+      };
+      saveRules(next);
+    }
+    if (night) night.addEventListener('change', onChange);
+    if (wifi)  wifi.addEventListener('change', onChange);
+    if (bat)   bat.addEventListener('change', onChange);
+  }
+
+  // ---------- Wrap upload / download for richer progress + logging ----------
+  function setProgress(msg){
+    const el = document.getElementById('tpi-sync-progress');
+    if (!el) return;
+    el.innerHTML = msg || '';
+  }
+
+  function wrapOnce(){
+    if (window.__tpi_sync_plus_wrapped) return;
+    window.__tpi_sync_plus_wrapped = true;
+
+    const _save = window.tpiSaveToday;
+    const _load = window.tpiLoadToday;
+
+    if (typeof _save === 'function'){
+      window.tpiSaveToday = async function(){
+        const date = getSelectedDate();
+        const rules = loadRules();
+        // 智能触发规则：仅在“自动”链路时才严格执行；手动点击不拦截
+        const start = Date.now();
+        const wrapper = buildUploadWrapperForCurrentSelection();
+        const bytes = wrapper ? JSON.stringify(wrapper).length : null;
+        setProgress(`⏳ 正在上传… ${date}${bytes?(' | 约 '+(bytes/1024).toFixed(1)+' KB'):""} `);
+
+        try{
+          const res = await _save.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:true, bytes: (bytes||0), durationMs: dur, extra: wrapper && wrapper.changedKeys ? ('changedKeys='+wrapper.changedKeys.length) : '' });
+          markSynced(date, { bytes: (bytes||0), durationMs: dur, checksum: wrapper ? wrapper.checksum : null, updatedAt: wrapper ? wrapper.updatedAt : null });
+          setProgress(`✅ 上传完成：${date} | ${(bytes||0)/1024>=1024?((bytes||0)/1024/1024).toFixed(2)+' MB':((bytes||0)/1024).toFixed(1)+' KB'} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'upload', date, ok:false, bytes:(bytes||0), durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 上传失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+
+    if (typeof _load === 'function'){
+      window.tpiLoadToday = async function(){
+        const date = getSelectedDate();
+        const start = Date.now();
+        setProgress(`⏳ 正在下载… ${date}`);
+        try{
+          const res = await _load.apply(this, arguments);
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:true, durationMs: dur });
+          setProgress(`✅ 下载完成：${date} | ${dur} ms`);
+          refreshStatsUI();
+          return res;
+        }catch(err){
+          const dur = Date.now() - start;
+          window.TPISyncLogger.add({ type:'download', date, ok:false, durationMs: dur, extra: (err && err.message) ? err.message : 'error' });
+          setProgress(`❌ 下载失败：${date} | ${dur} ms`);
+          refreshStatsUI();
+          throw err;
+        }
+      };
+    }
+  }
+
+  // ---------- One-click sync all unsynced dates ----------
+  function listLocalDates(){
+    const dates = [];
+    try{
+      for (let i=0; i<localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (k.startsWith('tpi_data_')){
+          const d = k.slice('tpi_data_'.length);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d)) dates.push(d);
+        }
+      }
+    }catch(e){}
+    dates.sort();
+    return dates;
+  }
+
+  async function syncAllUnsynced(){
+    if (typeof window.tpiSaveToday !== 'function') return;
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.disabled = true;
+
+    const dates = listLocalDates();
+    if (!dates.length){
+      setProgress('ℹ️ 未发现本地历史数据（tpi_data_YYYY-MM-DD）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 筛选未同步：无 marker 或 marker 早于本地更新时间（若有）
+    const pending = [];
+    dates.forEach(d=>{
+      const meta = getSyncedMeta(d);
+      if (!meta || !meta.syncedAt) { pending.push(d); return; }
+      // 若本地有 lastSavedAt 之类字段则更精确；否则当作已同步
+      try{
+        const raw = lsGet('tpi_data_' + d);
+        if (raw && meta.checksum){
+          // 粗略：若 checksum 不同则判为未同步
+          let parsed = null;
+          try{ parsed = JSON.parse(raw); }catch(e){ parsed = null; }
+          if (parsed){
+            const rawJson = JSON.stringify(parsed);
+            if (typeof window.__tpi_fnv1a32 === 'function'){
+              const c = window.__tpi_fnv1a32(rawJson);
+              if (c !== meta.checksum) pending.push(d);
+            }
+          }
+        }
+      }catch(e){}
+    });
+
+    if (!pending.length){
+      setProgress('✅ 全部日期均已同步（未检测到需要上传的日期）');
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    // 执行：逐日切换日期并上传（尽量不打断 UI）
+    let done = 0;
+    let totalBytes = 0;
+    const total = pending.length;
+
+    for (const d of pending){
+      done++;
+      try{
+        // 设置同步日期
+        const input = document.getElementById('tpi-sync-date');
+        if (input) input.value = d;
+        if (window.__tpi_syncDateToMain) { try{ window.__tpi_syncDateToMain(); }catch(e){} }
+
+        const w = buildUploadWrapperForCurrentSelection();
+        const bytes = w ? JSON.stringify(w).length : 0;
+        totalBytes += bytes;
+
+        setProgress(`⏳ 批量同步中… ${done}/${total} | 当前：${d} | 已同步 ${(totalBytes/1024/1024).toFixed(2)} MB`);
+        await window.tpiSaveToday(); // 已被包装，会写日志/marker
+      }catch(e){
+        setProgress(`⚠️ 批量同步中断：${d} 上传失败（已完成 ${done-1}/${total}）`);
+        break;
+      }
+    }
+    if (btn) btn.disabled = false;
+  }
+
+  function bindButtons(){
+    const btn = document.getElementById('tpi-sync-all-btn');
+    if (btn) btn.addEventListener('click', syncAllUnsynced);
+
+    const ref = document.getElementById('tpi-sync-refresh-stats');
+    if (ref) ref.addEventListener('click', refreshStatsUI);
+  }
+
+  // ---------- Auto sync loop (only when auto-backup enabled) ----------
+  async function shouldAutoSyncProceed(){
+    const rules = loadRules();
+    if (rules.nightOnly && !isNight()) return false;
+    if (rules.wifiOnly && !isGoodNetwork()) return false;
+    if (rules.batteryOnly && !(await isBatteryEnough())) return false;
+    return true;
+  }
+
+  function hookAutoBackup(){
+    // 原 auto backup checkbox：#tpi-auto-backup（每5分钟）
+    const auto = document.getElementById('tpi-auto-backup');
+    if (!auto) return;
+
+    // 保持你原行为：这里只在 tick 前加 rule gate
+    let timer = null;
+    function stop(){
+      if (timer) { clearInterval(timer); timer = null; }
+    }
+    async function tick(){
+      try{
+        if (!auto.checked) return;
+        if (!(await shouldAutoSyncProceed())) {
+          setProgress('⏸️ 自动同步已跳过：触发规则不满足（夜间/Wi‑Fi/电量）');
+          return;
+        }
+        // 自动同步默认同步所选日期（与原逻辑一致），但会写日志/marker
+        await window.tpiSaveToday();
+      }catch(e){}
+    }
+
+    auto.addEventListener('change', function(){
+      stop();
+      if (auto.checked){
+        timer = setInterval(tick, 5*60*1000);
+        // 立即跑一次但不抢焦点
+        setTimeout(tick, 1500);
+      }
+    });
+  }
+
+  // ---------- init ----------
+  function init(){
+    bindRuleUI();
+    bindButtons();
+    refreshStatsUI();
+    wrapOnce();
+    hookAutoBackup();
+  }
+
+  if (document.readyState === 'complete' || document.readyState === 'interactive'){
+    setTimeout(init, 50);
+  }else{
+    document.addEventListener('DOMContentLoaded', init);
+  }
+})();
+</script>
 
 </body>
 </html>
