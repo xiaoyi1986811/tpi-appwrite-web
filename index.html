@@ -30858,11 +30858,49 @@ window.__tpi_syncDateToMain = function(){
         return;
       }
 
-      // 1) 确保把“当前页面输入”写入本地（否则云端拿到的是旧数据）
+      // 1) 确保把"当前页面输入"写入本地（否则云端拿到的是旧数据）
       __tpi_setMainDate(dateStr);
+      // 1a) 触发所有输入框的input/change事件，确保动态计算分数同步写入
+      try {
+        document.querySelectorAll('input:not([type="file"]), select, textarea').forEach(el => {
+          try { el.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}
+          try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+        });
+      } catch(e) {}
+      // 1b) 触发分数重新计算，确保评级和分数是最新的
+      try { if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc(); } catch(e) {}
+      try { if (window.TPI && typeof window.TPI.calculateTPI === 'function') window.TPI.calculateTPI(); } catch(e) {}
+      // 1c) 保存到本地存储
       if(typeof saveToLocalStorage === 'function'){
         try{ saveToLocalStorage(); }catch(e){ console.warn('[云同步] saveToLocalStorage 调用失败(忽略):', e); }
       }
+
+      // 1d) 收集DOM统计信息（用于丰富上传成功的提示信息）
+      let __upload_stats = { checkboxes: 0, checkedBoxes: 0, textareas: 0, filledTextareas: 0, filledInputs: 0, scores: {} };
+      try {
+        document.querySelectorAll('input[type="checkbox"]').forEach(el => {
+          __upload_stats.checkboxes++;
+          if (el.checked) __upload_stats.checkedBoxes++;
+        });
+        document.querySelectorAll('textarea').forEach(el => {
+          __upload_stats.textareas++;
+          if ((el.value || '').trim()) __upload_stats.filledTextareas++;
+        });
+        document.querySelectorAll('input[type="number"]').forEach(el => {
+          if (el.readOnly || el.disabled) {
+            if (el.id && el.value && parseFloat(el.value) !== 0) {
+              __upload_stats.scores[el.id] = el.value;
+            }
+          } else if ((el.value || '').trim() && el.value !== '0') {
+            __upload_stats.filledInputs++;
+          }
+        });
+      } catch(e) { console.warn('[云同步] DOM统计收集失败(忽略):', e); }
+      let __tpi_total_score_upload = '';
+      try {
+        const tpiEl = document.getElementById('tpi-total') || document.getElementById('tpi-score') || document.getElementById('tpi-total-score');
+        if (tpiEl) __tpi_total_score_upload = (tpiEl.value || tpiEl.textContent || '').trim();
+      } catch(e) {}
 
       // 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
       console.log('📦 [上传] 正在打包 localStorage 数据...');
@@ -30920,14 +30958,21 @@ window.__tpi_syncDateToMain = function(){
 
       showModal?.({
         type:'success',
-        title:'上传成功',
+        title:'☁️ 上传成功',
         message:
-          `✅ 已上传所选日期数据到云端\n\n`+
-          `📅 日期：${dateStr}\n`+
-          `🆔 文档ID：${docId}\n`+
-          `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
-          `💾 数据大小：${dataStr.length} 字符 (${dataSizeKB} KB)\n`+
-          `⏰ 上传时间：${uploadTime}`,
+          `🎉 数据已成功同步上传至云端！\n\n`+
+          `📅 同步日期：${dateStr}\n`+
+          `⏱️ 耗时：${Date.now() - __upload_start_time}ms\n`+
+          `⏰ 上传时间：${uploadTime}\n\n`+
+          `━━━━━━ 📊 上传内容统计 ━━━━━━\n`+
+          `📦 数据条目：${Object.keys(payload).length} 个键\n`+
+          `💾 数据大小：${dataSizeKB} KB（${dataStr.length} 字符）\n`+
+          `☑️ 勾选框：${__upload_stats.checkedBoxes} / ${__upload_stats.checkboxes} 个已勾选\n`+
+          `📝 文本框：${__upload_stats.filledTextareas} / ${__upload_stats.textareas} 个有内容\n`+
+          `🔢 数字输入：${__upload_stats.filledInputs} 个有效值\n`+
+          `📈 自动计算字段：${Object.keys(__upload_stats.scores).length} 项\n`+
+          (__tpi_total_score_upload ? `🏆 TPI总分：${__tpi_total_score_upload}\n` : '')+
+          `\n🆔 文档ID：${docId}`,
         confirmText:'知道了'
       });
     }catch(err){
@@ -31198,17 +31243,45 @@ const __download_end_time = Date.now();
         }
       } catch(e) {}
 
+
+      // 收集下载后的DOM统计信息（用于丰富下载成功的提示信息）
+      let __download_stats = { checkboxes: 0, checkedBoxes: 0, textareas: 0, filledTextareas: 0, filledInputs: 0 };
+      try {
+        document.querySelectorAll('input[type="checkbox"]').forEach(el => {
+          __download_stats.checkboxes++;
+          if (el.checked) __download_stats.checkedBoxes++;
+        });
+        document.querySelectorAll('textarea').forEach(el => {
+          __download_stats.textareas++;
+          if ((el.value || '').trim()) __download_stats.filledTextareas++;
+        });
+        document.querySelectorAll('input[type="number"]:not([readonly]):not([disabled])').forEach(el => {
+          if ((el.value || '').trim() && el.value !== '0') __download_stats.filledInputs++;
+        });
+      } catch(e) {}
+      let __tpi_total_score_dl = '';
+      try {
+        const tpiEl2 = document.getElementById('tpi-total') || document.getElementById('tpi-score') || document.getElementById('tpi-total-score');
+        if (tpiEl2) __tpi_total_score_dl = (tpiEl2.value || tpiEl2.textContent || '').trim();
+      } catch(e) {}
       showModal?.({
         type:'success',
-        title:'下载成功',
+        title:'☁️ 下载成功',
         message:
-          `✅ 已从云端下载所选日期数据\n\n`+
-          `📅 日期：${dateStr}\n`+
-          `🆔 文档ID：${docId}\n`+
-          `📦 写入条目：${Object.keys(payload).length} 个 localStorage 键\n`+
-          `💾 数据大小：${dataSizeBytes} 字节 (${dataSizeKB} KB)\n`+
-          `🔄 下载前localStorage键数：${beforeKeys}\n`+
-          `⏰ 下载时间：${downloadTime}`,
+          `🎉 云端数据已成功同步至本地！\n\n`+
+          `📅 同步日期：${dateStr}\n`+
+          `⏱️ 耗时：${__download_end_time - __download_start_time}ms\n`+
+          `⏰ 下载时间：${downloadTime}\n\n`+
+          `━━━━━━ 📊 下载内容统计 ━━━━━━\n`+
+          `📦 数据条目：${Object.keys(payload).length} 个键\n`+
+          `💾 数据大小：${dataSizeKB} KB（${dataSizeBytes} 字节）\n`+
+          `🔄 本地键变化：${beforeKeys} → ${afterKeys}\n`+
+          `☑️ 勾选框：${__download_stats.checkedBoxes} / ${__download_stats.checkboxes} 个已恢复\n`+
+          `📝 文本框：${__download_stats.filledTextareas} / ${__download_stats.textareas} 个有内容\n`+
+          `🔢 数字输入：${__download_stats.filledInputs} 个有效值\n`+
+          (__tpi_total_score_dl ? `🏆 TPI总分：${__tpi_total_score_dl}\n` : '')+
+          `\n🆔 文档ID：${docId}\n`+
+          `💡 分数、评级、图表已实时更新`,
         confirmText:'知道了'
       });
     }catch(err){
