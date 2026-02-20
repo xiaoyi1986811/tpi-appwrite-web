@@ -4276,7 +4276,7 @@ window.checkDataHealthComplete = function() {
         console.log('📊 [checkDataHealthComplete] 发现问题:', issues.length);
         
         // 计算存储空间使用率
-        const maxSize = (window.__idbQuota || 2 * 1024 * 1024 * 1024); // IndexedDB 配额
+        const maxSize = (window.__idbQuota && window.__idbQuota > 10*1024*1024 ? window.__idbQuota : 2*1024*1024*1024); // IndexedDB 配额
         const usagePercent = ((totalSize / maxSize) * 100).toFixed(2);
         
         // 生成报告
@@ -19359,7 +19359,7 @@ try {
 
                     // 验证数据大小（localStorage限制通常为5-10MB）
                     const dataStr = JSON.stringify(data);
-                    if (dataStr.length > (window.__idbQuota || 2147483648)) { // IndexedDB配额限制
+                    if (dataStr.length > (window.__idbQuota && window.__idbQuota > 10*1024*1024 ? window.__idbQuota : 2147483648)) { // IndexedDB配额限制
                         throw new Error('数据过大，无法保存');
                     }
 
@@ -19495,7 +19495,7 @@ try {
                         }
                     }
                     const sizeInMB = totalSize / (1024 * 1024);
-                    const maxSize = (window.__idbQuotaMB || 2048);
+                    const maxSize = (window.__idbQuotaMB && window.__idbQuotaMB > 10 ? window.__idbQuotaMB : 2048);
                     return (sizeInMB / maxSize) * 100;
                 } catch (e) {
                     return 0;
@@ -21143,7 +21143,7 @@ ${reflection}
                     }
 
                     const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
-                    const maxSize = (window.__idbQuotaMB || 2048);
+                    const maxSize = (window.__idbQuotaMB && window.__idbQuotaMB > 10 ? window.__idbQuotaMB : 2048);
                     const percentage = (sizeInMB / maxSize) * 100;
 
                     if (barFill) {
@@ -22243,7 +22243,7 @@ function checkStorageUsage() {
     }
 
     const sizeInMB = (totalSize / (1024 * 1024)).toFixed(2);
-    const maxSize = (window.__idbQuotaMB || 2048);
+    const maxSize = (window.__idbQuotaMB && window.__idbQuotaMB > 10 ? window.__idbQuotaMB : 2048);
     const percentage = (totalSize / (maxSize * 1024 * 1024)) * 100;
 
     const storageInfo = document.getElementById('storage-usage-info');
@@ -25355,7 +25355,7 @@ window.addEventListener('resize', function() {
             }
 
             // 计算存储空间使用率
-            const maxSize = (window.__idbQuota || 2 * 1024 * 1024 * 1024); // IndexedDB 配额
+            const maxSize = (window.__idbQuota && window.__idbQuota > 10*1024*1024 ? window.__idbQuota : 2*1024*1024*1024); // IndexedDB 配额
             const usagePercent = ((totalSize / maxSize) * 100).toFixed(2);
 
             // 生成报告
