@@ -385,13 +385,22 @@ window.__tpi_clearAllForm = function() {
 
     // 9) 清空杂事记录 UI
     try {
-      const miscText = document.getElementById('misc-edit-content');
-      if (miscText) miscText.value = '';
+      // ✅ 兼容：旧ID(misc-edit-content/misc-records-list)已废弃，当前版本使用 misc-records-json / misc-log-list
       const miscHidden = document.getElementById('misc-records-json');
       if (miscHidden) miscHidden.value = '[]';
-      const miscList = document.getElementById('misc-records-list') || 
+      const miscList = document.getElementById('misc-log-list') || document.getElementById('misc-records-list') ||
                        document.querySelector('#misc-records .records-list');
       if (miscList) miscList.innerHTML = '';
+      const miscCount = document.getElementById('misc-log-count');
+      const miscChars = document.getElementById('misc-log-chars');
+      if (miscCount) miscCount.textContent = '0';
+      if (miscChars) miscChars.textContent = '0';
+      const miscEmpty = document.getElementById('misc-log-empty');
+      if (miscEmpty) miscEmpty.style.display = 'block';
+      // 同步清空模块内存/渲染（如存在）
+      if (window.MiscLog && typeof window.MiscLog.render === 'function') {
+        try { window.MiscLog.render([]); } catch(e) {}
+      }
     } catch(e) {
       console.warn('清空杂事记录时出错:', e);
     }
@@ -1033,8 +1042,7 @@ window.__tpi_legacy_loadTpiData_1 = function () {
           lines.push('|---------|---------|');
           tableItems.forEach(function(row) {
             var lbl = row.label.replace(/\|/g, '｜'); // escape pipes
-            var v = String(row.val).replace(/\|/g, '｜').replace(/
-/g, ' ').slice(0, 200);
+            var v = String(row.val).replace(/\|/g, '｜').replace(/\n/g, ' ').slice(0, 200);
             lines.push('| ' + lbl + ' | ' + v + ' |');
           });
           lines.push('');
@@ -13569,8 +13577,14 @@ else FutureRadar.init();
 <option value="1">
               ✅ 完成
              </option>
+<option value="0">
+              ⭕ 未完成
+             </option>
 <option value="exempt">
               🛡️ 豁免
+             </option>
+<option value="other">
+              🔍 其他
              </option>
 </select>
 </td>
@@ -13578,7 +13592,7 @@ else FutureRadar.init();
 <label style="font-size:11px; display:block;">
              今日在宿舍时间(分钟)
             </label>
-<input aria-label="今日午间在宿舍时间" id="bcm-lunch-today-duration" oninput="calculateDefenseScore('lunch'); calculateBCM(); calculateTPI();" placeholder="0=坚守" style="width: 100px; text-align: center;" type="number"/>
+<input aria-label="今日午间在宿舍时间" id="bcm-lunch-today-duration"  placeholder="0=坚守" style="width: 100px; text-align: center;" type="number"/>
 <small style="font-size:10px; color:#666; display:block; margin-top:2px;">
              0=坚守,1-20=战术,&gt;20=维持
             </small>
@@ -13587,7 +13601,7 @@ else FutureRadar.init();
 <label style="font-size:11px; display:block;">
              昨日在宿舍时间(分钟)
             </label>
-<input aria-label="昨日午间在宿舍时间" id="bcm-lunch-yesterday-duration" oninput="calculateDefenseScore('lunch'); calculateBCM(); calculateTPI();" placeholder="自动填充" style="width: 100px; text-align: center;" type="number"/>
+<input aria-label="昨日午间在宿舍时间" id="bcm-lunch-yesterday-duration"  placeholder="自动填充" style="width: 100px; text-align: center;" type="number"/>
 <small style="font-size:10px; color:#666; display:block; margin-top:2px;">
              系统自动填充,可修改
             </small>
@@ -13691,8 +13705,14 @@ else FutureRadar.init();
 <option value="1">
               ✅ 完成
              </option>
+<option value="0">
+              ⭕ 未完成
+             </option>
 <option value="exempt">
               🛡️ 豁免
+             </option>
+<option value="other">
+              🔍 其他
              </option>
 </select>
 </td>
@@ -13700,7 +13720,7 @@ else FutureRadar.init();
 <label style="font-size:11px; display:block;">
              今日在宿舍时间(分钟)
             </label>
-<input aria-label="今日晚间在宿舍时间" id="bcm-dinner-today-duration" oninput="calculateDefenseScore('dinner'); calculateBCM(); calculateTPI();" placeholder="0=坚守" style="width: 100px; text-align: center;" type="number"/>
+<input aria-label="今日晚间在宿舍时间" id="bcm-dinner-today-duration"  placeholder="0=坚守" style="width: 100px; text-align: center;" type="number"/>
 <small style="font-size:10px; color:#666; display:block; margin-top:2px;">
              0=坚守,1-20=战术,&gt;20=维持
             </small>
@@ -13709,7 +13729,7 @@ else FutureRadar.init();
 <label style="font-size:11px; display:block;">
              昨日在宿舍时间(分钟)
             </label>
-<input aria-label="昨日晚间在宿舍时间" id="bcm-dinner-yesterday-duration" oninput="calculateDefenseScore('dinner'); calculateBCM(); calculateTPI();" placeholder="自动填充" style="width: 100px; text-align: center;" type="number"/>
+<input aria-label="昨日晚间在宿舍时间" id="bcm-dinner-yesterday-duration"  placeholder="自动填充" style="width: 100px; text-align: center;" type="number"/>
 <small style="font-size:10px; color:#666; display:block; margin-top:2px;">
              系统自动填充,可修改
             </small>
@@ -18053,6 +18073,10 @@ function calculateAMI() {
             function calculateBCM() {
                 let totalScore = 0;
 
+                // 确保午间/晚间防守在任何数据恢复/自动填充后都能刷新（避免仅靠 oninput 触发）
+                try { calculateDefenseScore('lunch'); } catch(e) {}
+                try { calculateDefenseScore('dinner'); } catch(e) {}
+
                 try {
                     // 1. 晨间入馆 (调用独立函数)
                     const s1 = calculateMorningScore();
@@ -20683,10 +20707,10 @@ try {
                     }, 500);
 
            // 午间防守和晚间防守的自动计算
-            const lunchDuration = document.getElementById('bcm-lunch-duration');
-            const lunchRef = document.getElementById('bcm-lunch-ref');
-            const dinnerDuration = document.getElementById('bcm-dinner-duration');
-            const dinnerRef = document.getElementById('bcm-dinner-ref');
+            const lunchDuration = document.getElementById('bcm-lunch-today-duration');
+            const lunchRef = document.getElementById('bcm-lunch-yesterday-duration');
+            const dinnerDuration = document.getElementById('bcm-dinner-today-duration');
+            const dinnerRef = document.getElementById('bcm-dinner-yesterday-duration');
 
             /**
              * 计算防守得分 (第22版 - 动态奖惩机制)
@@ -31732,11 +31756,16 @@ function __setupAuthForms(){
   if (document.getElementById('tpi-username')) __wireValue('tpi-username', 'register-email');
   if (document.getElementById('tpi-password')) __wireValue('tpi-password', 'register-password');
 
-  // 处理登录表单提交
-  document.getElementById('login-form').addEventListener('submit', async (e) => {
+  // 处理登录表单提交（兼容：旧 login-form 可能不存在）
+  (function(){
+    var __lf = document.getElementById('login-form');
+    if (!__lf || !__lf.addEventListener) return;
+    __lf.addEventListener('submit', async (e) => {
       e.preventDefault(); // 阻止页面刷新
-      const email = document.getElementById('login-email').value;
-      const password = document.getElementById('login-password').value;
+      const __emailEl = document.getElementById('login-email') || document.getElementById('tpi-username');
+      const email = __emailEl ? __emailEl.value : '';
+      const __passEl = document.getElementById('login-password') || document.getElementById('tpi-password');
+      const password = __passEl ? __passEl.value : '';
 
       try {
           // 调用 Appwrite 登录 API
@@ -31747,13 +31776,19 @@ function __setupAuthForms(){
           console.error('登录失败:', error);
           alert('登录失败: ' + (error.message || '未知错误'));
       }
-  });
+    });
+  })();
 
-  // 处理注册表单提交
-  document.getElementById('register-form').addEventListener('submit', async (e) => {
+  // 处理注册表单提交（兼容：旧 register-form 可能不存在）
+  (function(){
+    var __rf = document.getElementById('register-form');
+    if (!__rf || !__rf.addEventListener) return;
+    __rf.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const email = document.getElementById('register-email').value;
-      const password = document.getElementById('register-password').value;
+      const __emailEl = document.getElementById('register-email') || document.getElementById('tpi-username');
+      const email = __emailEl ? __emailEl.value : '';
+      const __passEl = document.getElementById('register-password') || document.getElementById('tpi-password');
+      const password = __passEl ? __passEl.value : '';
 
       try {
           // 调用 Appwrite 注册 API
@@ -31766,7 +31801,8 @@ function __setupAuthForms(){
           console.error('注册失败:', error);
           alert('注册失败: ' + (error.message || '未知错误'));
       }
-  });
+    });
+  })();
 
   // 兼容提示词中的“tab按钮”（若不存在则创建隐藏节点）
   __ensureButton('btn-login-tab', 'Login', authSection);
@@ -33580,7 +33616,16 @@ window.__tpiDirectExport = function(fmt) {
     alert('✅ Markdown 导出成功！\n文本框：'+filledTA2.length+' 个\n分数项：'+scoreKeys.length+' 项\n数字字段：'+filledNum.length+' 个\n杂记：'+miscRecords.length+' 条\n雷达事件：'+radarTotal2+' 条');
   }
 };
+
+// === Expose critical calculators to global scope for inline handlers ===
+try {
+  if (typeof calculateDefenseScore === 'function' && !window.calculateDefenseScore) window.calculateDefenseScore = calculateDefenseScore;
+  if (typeof calculateBCM === 'function' && !window.calculateBCM) window.calculateBCM = calculateBCM;
+  if (typeof calculateTPI === 'function' && !window.calculateTPI) window.calculateTPI = calculateTPI;
+} catch(e) {}
+
 </script>
+
 
 </body>
 </html>
