@@ -4394,8 +4394,8 @@ if (typeof window.showModal === 'undefined') {
                 ${message}
             </div>
             <div class="modal-footer" style="padding: 15px 20px; border-top: 1px solid #e5e7eb; display: flex; gap: 10px; justify-content: flex-end;">
-                ${showCancel ? `<button class="modal-cancel-btn" style="padding: 10px 20px; border: 1px solid #d1d5db; background: white; color: #6b7280; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;">${cancelText}</button>` : ''}
-                ${showConfirm ? `<button class="modal-confirm-btn" style="padding: 10px 20px; border: none; background: ${iconColor}; color: white; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;">${confirmText}</button>` : ''}
+                ${showCancel ? `<button class="modal-cancel-btn" type="button" style="padding: 10px 20px; border: 1px solid #d1d5db; background: white; color: #6b7280; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;">${cancelText}</button>` : ''}
+                ${showConfirm ? `<button class="modal-confirm-btn" type="button" style="padding: 10px 20px; border: none; background: ${iconColor}; color: white; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;">${confirmText}</button>` : ''}
             </div>
         `;
         
@@ -4416,7 +4416,7 @@ if (typeof window.showModal === 'undefined') {
         // 确认按钮
         const confirmBtn = content.querySelector('.modal-confirm-btn');
         if (confirmBtn) {
-            confirmBtn.addEventListener('click', () => {
+            confirmBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
                 console.log('✅ [showModal] 用户点击确认');
                 if (onConfirm) onConfirm();
                 closeModal();
@@ -4436,7 +4436,7 @@ if (typeof window.showModal === 'undefined') {
         // 取消按钮
         const cancelBtn = content.querySelector('.modal-cancel-btn');
         if (cancelBtn) {
-            cancelBtn.addEventListener('click', () => {
+            cancelBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
                 console.log('❌ [showModal] 用户点击取消');
                 if (onCancel) onCancel();
                 closeModal();
@@ -19186,7 +19186,7 @@ if (!calculateTPI_original) {
                             ${details ? `<div class="modal-details">${details}</div>` : ''}
                         </div>
                         <div class="modal-footer">
-                            <button class="modal-button modal-button-primary">${buttonText}</button>
+                            <button class="modal-button modal-button-primary" type="button">${buttonText}</button>
                         </div>
                     `;
 
@@ -19212,7 +19212,7 @@ if (!calculateTPI_original) {
                     // 绑定按钮事件
                     const button = modal.querySelector('.modal-button');
                     if (button) {
-                        button.addEventListener('click', closeModal);
+                        button.addEventListener('click', function(e){ try{ e.preventDefault(); e.stopPropagation(); }catch(_){ } closeModal(); });
                     }
 
                     // 阻止遮罩层点击关闭(必须点按钮)
@@ -23057,7 +23057,7 @@ window.addEventListener('resize', function() {
                     <div class="modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
                             <h2 style="margin: 0;">📊 数据对比分析</h2>
-                            <button class="close-btn" onclick="this.closest('.modal-overlay').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">✕</button>
+                            <button class="close-btn" type="button" onclick="this.closest('.modal-overlay').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">✕</button>
                         </div>
                         <div class="modal-body" style="padding: 20px;">
                             <div style="margin-bottom: 20px;">
@@ -23240,7 +23240,7 @@ window.addEventListener('resize', function() {
                     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
                             <h2 style="margin: 0;">📝 生成报告</h2>
-                            <button class="close-btn" onclick="this.closest('.modal-overlay').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">✕</button>
+                            <button class="close-btn" type="button" onclick="this.closest('.modal-overlay').remove()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;" onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">✕</button>
                         </div>
                         <div class="modal-body" style="padding: 20px;">
                             <div class="mb-4">
