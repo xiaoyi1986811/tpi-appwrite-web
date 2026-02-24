@@ -16141,32 +16141,6 @@ const TPI = (function() {
                 BUFFER_MINUTES: 15           // 全局缓冲时间 (第22版)
             };
 
-            // 时间工具类 (处理缓冲与跨天)
-            const TimeUtils = {
-                toMinutes: function(timeStr) {
-                    if (!timeStr) return null;
-                    const [h, m] = timeStr.split(':').map(Number);
-                    return h * 60 + m;
-                },
-                // 带缓冲的比较： actual <= target + buffer 返回 true
-                isWithin: function(actualTimeStr, targetMinutes) {
-                    const act = this.toMinutes(actualTimeStr);
-                    if (act === null) return false;
-                    // 特殊处理跨天：如果 target < 120 (凌晨2点前), act > 1000 (晚上), 则 act 视为负数?
-                    // 简化策略：BCM只处理当日/次日凌晨。
-                    let actAdjusted = act;
-                    if (act < 300 && targetMinutes > 1000) actAdjusted += 1440; // 跨天修正
-
-                    return actAdjusted <= (targetMinutes + CONSTANTS.BUFFER_MINUTES);
-                },
-                // 获取分钟数（带跨天处理，用于比较）
-                getComparableMinutes: function(timeStr) {
-                    const m = this.toMinutes(timeStr);
-                    if (m === null) return 9999;
-                    return m < 300 ? m + 1440 : m; // 凌晨算作第二天
-                }
-            };
-
             // ==================== 状态管理 ====================
             const state = {
                 selectedMode: null,
@@ -17791,6 +17765,23 @@ function calculateAMI() {
             }
 
             /**
+             * 跨午夜时间转换 (修复版)
+             * 将 HH:MM 转为可比较的分钟数，凌晨0:00-5:59视为第二天 (+1440)
+             * 用于晚间离馆、睡眠等涉及午夜跨越的时间评分
+             */
+            function toNightMinutes(timeStr) {
+                if (!timeStr || typeof timeStr !== 'string') return 0;
+                const parts = timeStr.split(':');
+                if (parts.length !== 2) return 0;
+                const h = parseInt(parts[0]) || 0;
+                const m = parseInt(parts[1]) || 0;
+                const raw = h * 60 + m;
+                // 凌晨 0:00-5:59 视为次日，加 1440 分钟
+                return raw < 360 ? raw + 1440 : raw;
+            }
+
+
+            /**
              * 自动化Bonus检查器 (新增：连胜检测)
              */
             function checkAutoBonuses() {
@@ -17975,7 +17966,8 @@ function calculateAMI() {
                 }
 
                 const timeStr = eveningExitInput.value;
-                const minutes = timeToMinutes(timeStr);
+                // 使用toNightMinutes处理跨午夜：00:30 → 1470分钟，避免误判为传奇
+                const minutes = toNightMinutes(timeStr);
                 let score = 0;
 
                 // 第22版晚间离馆评分阶梯
@@ -18055,8 +18047,9 @@ function calculateAMI() {
                 // 动态奖惩: 与昨日入睡时间差Δt
                 let dynamicBonus = 0;
                 if (yesterdayTime && yesterdayTime !== '--:--') {
-                    const todayMinutes = timeToMinutes(timeStr);
-                    const yesterdayMinutes = timeToMinutes(yesterdayTime);
+                    // 使用toNightMinutes处理跨午夜：凌晨时间+1440，确保deltaT方向正确
+                    const todayMinutes = toNightMinutes(timeStr);
+                    const yesterdayMinutes = toNightMinutes(yesterdayTime);
                     const deltaT = todayMinutes - yesterdayMinutes; // 正数=今天更晚
 
                     // 第22版动态奖惩阶梯
@@ -25799,6 +25792,8 @@ window.archiveOldDataComplete = function() {
 };
 
 console.log('✅ 全局函数已定义: copyPreviousDayDataComplete, archiveOldDataComplete');
+
+})();
   </script>
 <script>
    // ═══════════════════════════════════════════════════════════════════
@@ -26336,6 +26331,10 @@ html += `</head><body>
         // ═══════════════════════════════════════════════════════════════════
         if (!window.openBackupManagerComplete) {
             window.openBackupManagerComplete = function(){ try{ alert('ℹ️ 备份管理器（备份历史列表/恢复/删除）已移除'); }catch(e){} };
+        }
+    } // end applyFixes
+})(); // end IIFE
+
 // 页面加载完成后初始化
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
