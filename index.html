@@ -9767,6 +9767,8 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
         }
     }
 
+} // end class FutureRadarSystemV3
+
 const FutureRadar = new FutureRadarSystemV3();
 window.FutureRadar = FutureRadar; // 暴露给插件使用
 // 防御性初始化：即使页面其他部分报错（如 AutoSaveManager 未定义），也确保本模块按钮可用
