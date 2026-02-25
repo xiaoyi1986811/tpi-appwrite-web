@@ -7441,7 +7441,7 @@ window.exportAsCSV = function() {
       🧪 测试推送通道
     </button>
 
-    <button onclick="FutureRadar.saveWorkerConfig()"
+    <button onclick="FutureRadar.saveWorkerUrl()"
       style="padding:9px; background:linear-gradient(135deg,#8b5cf6,#6d28d9); color:#fff; border:none; border-radius:8px; font-weight:600; cursor:pointer; font-size:13px;">
       💾 保存 Worker 配置
     </button>
@@ -9584,10 +9584,23 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
         if (!url) { statusEl.innerHTML = '<span style="color:#ef4444">请先输入 Worker URL</span>'; return; }
         statusEl.innerHTML = '<span style="color:#6b7280">连接中...</span>';
         try {
-            const resp = await fetch(url + '/status');
+            let resp;
+            try {
+                resp = await fetch(url + '/status', { mode: 'cors' });
+            } catch(corsErr) {
+                // CORS blocked but Worker is reachable — try no-cors ping
+                try {
+                    await fetch(url + '/status', { mode: 'no-cors' });
+                    statusEl.innerHTML = '<span style="color:#f59e0b">⚠️ Worker 可达，但存在 CORS 限制，无法读取响应。请在 Cloudflare Worker 中添加 CORS 响应头。</span>';
+                } catch(e2) {
+                    statusEl.innerHTML = `<span style="color:#ef4444">❌ 无法连接：${corsErr.message}</span>`;
+                }
+                return;
+            }
             if (resp.ok) {
-                const data = await resp.json();
-                statusEl.innerHTML = `<span style="color:#10b981">✅ 连接成功 | 北京时间：${data.time_beijing} | Token已配置：${data.pushplus_token_set ? '是' : '否（请在CF后台设置）'}</span>`;
+                let data = {};
+                try { data = await resp.json(); } catch(_) {}
+                statusEl.innerHTML = `<span style="color:#10b981">✅ 连接成功 | 北京时间：${data.time_beijing || 'N/A'} | Token已配置：${data.pushplus_token_set ? '是' : '否（请在CF后台设置）'}</span>`;
             } else {
                 statusEl.innerHTML = `<span style="color:#ef4444">❌ 连接失败：HTTP ${resp.status}</span>`;
             }
@@ -9596,19 +9609,32 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
         }
     }
 
+
     // 手动触发Worker推送
     async triggerWorkerNow(type) {
         const url = ((__tpi_ls_get && __tpi_ls_get('tpi_radar_worker_url')) || '').replace(/\/$/, '');
         if (!url) { alert('请先输入并保存 Worker URL'); return; }
-        const endpoint = type === 'daily' ? '/trigger/daily' : '/trigger/sameday';
+        let endpoint;
+        if (type === 'daily') endpoint = '/trigger/daily';
+        else if (type === 'test') endpoint = '/trigger/test';
+        else endpoint = '/trigger/sameday';
         try {
-            const resp = await fetch(url + endpoint);
-            const text = await resp.text();
-            this.showSimpleNotification(text, resp.ok ? 'success' : 'warning');
+            // 先尝试正常请求，若CORS失败则用no-cors模式（无法读取响应体，但请求会发出）
+            let resp;
+            try {
+                resp = await fetch(url + endpoint, { mode: 'cors' });
+                const text = await resp.text();
+                this.showSimpleNotification(text || '✅ 触发成功', resp.ok ? 'success' : 'warning');
+            } catch(corsErr) {
+                // CORS blocked, try no-cors (fire-and-forget, can't read response)
+                await fetch(url + endpoint, { mode: 'no-cors' });
+                this.showSimpleNotification('✅ 已发送触发请求（Worker已收到，CORS限制无法读取响应）', 'success');
+            }
         } catch(e) {
             this.showSimpleNotification('❌ 触发失败：' + e.message, 'error');
         }
     }
+
 
     // 保存Worker URL
     saveWorkerUrl() {
