@@ -4349,7 +4349,7 @@ if (typeof window.showModal === 'undefined') {
             display: flex;
             align-items: center;
             justify-content: center;
-            z-index: 2147483647;
+            z-index: 10000;
             animation: modalFadeIn 0.2s ease-out;
         `;
         
@@ -5476,7 +5476,7 @@ window.exportAsCSV = function() {
   left: 0; right: 0;
   width: 100%;
   /* 分数看板必须置顶：位于最上层；quick-nav 会被下移到看板下方 */
-  z-index: 2147483647;
+  z-index: 10000;
   background: linear-gradient(135deg,#e0e7ff 0%,#ddd6fe 100%);
   padding: 2px 4px; /* 更紧凑（再次缩小） */
   border-bottom: 1px solid rgba(15,23,42,.08);
@@ -7446,6 +7446,9 @@ window.exportAsCSV = function() {
       💾 保存 Worker 配置
     </button>
   </div>
+
+  <!-- 连接状态显示 -->
+  <div id="radar-worker-status" style="margin-bottom:10px; font-size:13px; min-height:20px;"></div>
 
   <!-- 说明区 -->
   <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:12px; font-size:12px; color:#166534; margin-bottom:12px;">
@@ -9579,112 +9582,107 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
     async testWorkerConnection() {
         const urlEl = document.getElementById('radar-worker-url');
         const statusEl = document.getElementById('radar-worker-status');
-        if (!urlEl || !statusEl) return;
-        const url = urlEl.value.trim();
-        if (!url) { statusEl.innerHTML = '<span style="color:#ef4444">请先输入 Worker URL</span>'; return; }
-        statusEl.innerHTML = '<span style="color:#6b7280">连接中...</span>';
-        try {
-            let resp;
+        const url = (urlEl ? urlEl.value.trim() : '') || ((__tpi_ls_get && __tpi_ls_get('tpi_radar_worker_url')) || '').replace(/\/$/, '');
+        if (!url) {
+            const msg = '请先输入 Worker URL';
+            if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444">' + msg + '</span>';
+            this.__workerToast('❌ ' + msg, 'error', url, null, null);
+            return;
+        }
+        if (statusEl) statusEl.innerHTML = '<span style="color:#6b7280">连接中...</span>';
+        // 尝试多个端点：/health（已知可用）、/status（备用）
+        const endpoints = ['/health', '/status'];
+        let lastErr = null;
+        for (const ep of endpoints) {
+            const fullUrl = url.replace(/\/$/, '') + ep;
             try {
-                resp = await fetch(url + '/status', { mode: 'cors' });
-            } catch(corsErr) {
-                // CORS blocked but Worker is reachable — try no-cors ping
+                let resp;
                 try {
-                    await fetch(url + '/status', { mode: 'no-cors' });
-                    statusEl.innerHTML = '<span style="color:#f59e0b">⚠️ Worker 可达，但存在 CORS 限制，无法读取响应。请在 Cloudflare Worker 中添加 CORS 响应头。</span>';
-                } catch(e2) {
-                    statusEl.innerHTML = `<span style="color:#ef4444">❌ 无法连接：${corsErr.message}</span>`;
+                    resp = await fetch(fullUrl, { mode: 'cors' });
+                } catch(corsErr) {
+                    try {
+                        await fetch(fullUrl, { mode: 'no-cors' });
+                        const msg = `⚠️ Worker 可达(${ep})，但存在 CORS 限制，无法读取响应`;
+                        if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b">' + msg + '</span>';
+                        this.__workerToast(msg, 'warning', fullUrl, null, 'CORS限制');
+                        return;
+                    } catch(e2) {
+                        lastErr = corsErr;
+                        continue;
+                    }
+                }
+                let data = {};
+                let rawText = '';
+                try { rawText = await resp.text(); try { data = JSON.parse(rawText); } catch(_){} } catch(_) {}
+                if (resp.ok) {
+                    const msg = `✅ 连接成功(${ep}) | 北京时间：${data.time_beijing||data.beijing_time||'N/A'} | Token：${data.pushplus_token_set?'已配置':'未配置（请在CF后台设置）'}`;
+                    if (statusEl) statusEl.innerHTML = '<span style="color:#10b981">' + msg + '</span>';
+                    this.__workerToast(msg, 'success', fullUrl, resp.status, rawText.slice(0,200));
+                } else {
+                    const msg = `❌ 连接失败(${ep})：HTTP ${resp.status}`;
+                    if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444">' + msg + '</span>';
+                    this.__workerToast(msg, 'error', fullUrl, resp.status, rawText.slice(0,200));
                 }
                 return;
+            } catch(e) {
+                lastErr = e;
             }
-            if (resp.ok) {
-                let data = {};
-                try { data = await resp.json(); } catch(_) {}
-                statusEl.innerHTML = `<span style="color:#10b981">✅ 连接成功 | 北京时间：${data.time_beijing || 'N/A'} | Token已配置：${data.pushplus_token_set ? '是' : '否（请在CF后台设置）'}</span>`;
-            } else {
-                statusEl.innerHTML = `<span style="color:#ef4444">❌ 连接失败：HTTP ${resp.status}</span>`;
-            }
-        } catch(e) {
-            statusEl.innerHTML = `<span style="color:#ef4444">❌ 无法连接：${e.message}</span>`;
         }
+        const msg = `❌ 无法连接：${lastErr ? lastErr.message : '未知错误'}`;
+        if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444">' + msg + '</span>';
+        this.__workerToast(msg, 'error', url + endpoints[0], null, lastErr ? lastErr.message : '');
     }
 
 
-    // 手动触发Worker推送（增强版：总是给出可见提示，并尽量解析JSON）
+    // 手动触发Worker推送
     async triggerWorkerNow(type) {
-        const base = ((__tpi_ls_get && __tpi_ls_get('tpi_radar_worker_url')) || '').replace(/\/$/, '');
-        if (!base) { alert('请先输入并保存 Worker URL'); return; }
+        const url = ((__tpi_ls_get && __tpi_ls_get('tpi_radar_worker_url')) || '').replace(/\/$/, '');
+        if (!url) {
+            this.__workerToast('❌ 请先输入并保存 Worker URL', 'error', '', null, null);
+            return;
+        }
+        // 路由映射：同时兼容新旧路径（test 优先用 /trigger/test-push，若404再fallback /trigger/test）
+        let primaryEndpoint, fallbackEndpoint;
+        if (type === 'daily') { primaryEndpoint = '/trigger/daily'; fallbackEndpoint = null; }
+        else if (type === 'test') { primaryEndpoint = '/trigger/test-push'; fallbackEndpoint = '/trigger/test'; }
+        else { primaryEndpoint = '/trigger/sameday'; fallbackEndpoint = null; }
 
-        let endpoint;
-        if (type === 'daily') endpoint = '/trigger/daily';
-        else if (type === 'test') endpoint = '/trigger/test';
-        else endpoint = '/trigger/sameday';
-
-        const url = base + endpoint;
-
-        const formatMsg = (objOrText, ok) => {
-            // 兼容多种返回格式：{msg}/{message}/{data.msg} 或纯文本
+        const tryFetch = async (endpoint) => {
+            const fullUrl = url + endpoint;
             try {
-                if (typeof objOrText === 'string') {
-                    const t = objOrText.trim();
-                    if (t.startsWith('{') || t.startsWith('[')) {
-                        const o = JSON.parse(t);
-                        return formatMsg(o, ok);
-                    }
-                    return t || (ok ? '✅ 触发成功' : '⚠️ 请求已返回但非成功');
+                let resp;
+                try {
+                    resp = await fetch(fullUrl, { mode: 'cors' });
+                    const text = await resp.text();
+                    return { ok: resp.ok, status: resp.status, text, fullUrl, corsBlocked: false };
+                } catch(corsErr) {
+                    await fetch(fullUrl, { mode: 'no-cors' });
+                    return { ok: true, status: null, text: 'CORS限制，请求已发出但无法读取响应', fullUrl, corsBlocked: true };
                 }
-                const o = objOrText || {};
-                const msg =
-                    o.msg || o.message || (o.data && (o.data.msg || o.data.message)) ||
-                    (o.pushplus_response ? ('PushPlus: ' + o.pushplus_response) : '');
-                if (msg) return msg;
-                if (o.ok === true || o.success === true || o.code === 0) return '✅ 触发成功';
-                return ok ? '✅ 触发成功' : '⚠️ 请求已返回但非成功';
-            } catch (e) {
-                return ok ? '✅ 触发成功' : '⚠️ 请求已返回但非成功';
-            }
-        };
-
-        const notify = (text, ok) => {
-            // 优先用全局 toast（若存在），否则用本地备用通知
-            const t = (text || '').toString();
-            if (window.safeShowToast) {
-                window.safeShowToast(t, ok ? 'success' : 'warning');
-            } else if (window.InputValidator && window.InputValidator.showToast) {
-                window.InputValidator.showToast(t, ok ? 'success' : 'warning');
-            } else {
-                this.showSimpleNotification(t, ok ? 'success' : 'warning');
+            } catch(e) {
+                return { ok: false, status: null, text: e.message, fullUrl, corsBlocked: false, networkError: true };
             }
         };
 
         try {
-            let resp;
-            try {
-                resp = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
-            } catch (corsErr) {
-                // 某些环境仍可能被拦截：退化为 no-cors（只能发出请求，读不到响应）
-                await fetch(url, { method: 'GET', mode: 'no-cors', cache: 'no-store' });
-                notify('✅ 已发送触发请求（浏览器限制无法读取响应体，但Worker应已收到）', true);
-                return;
+            let result = await tryFetch(primaryEndpoint);
+            // 若主路径返回404且有fallback，尝试fallback
+            if (!result.corsBlocked && result.status === 404 && fallbackEndpoint) {
+                const fbResult = await tryFetch(fallbackEndpoint);
+                if (fbResult.ok || fbResult.corsBlocked) result = fbResult;
             }
-
-            const ct = (resp.headers.get('content-type') || '').toLowerCase();
-            let payload;
-            if (ct.includes('application/json')) {
-                try { payload = await resp.json(); }
-                catch { payload = await resp.text(); }
+            let msgPreview = '';
+            try { const j = JSON.parse(result.text); msgPreview = j.msg || j.message || j.status || result.text; } catch(_) { msgPreview = result.text; }
+            msgPreview = (msgPreview || '').slice(0, 200);
+            if (result.ok || result.corsBlocked) {
+                this.__workerToast((result.corsBlocked ? '✅ 已发出请求（CORS限制，无法读取响应）' : ('✅ 触发成功：' + msgPreview)), 'success', result.fullUrl, result.status, result.text);
+                this.showSimpleNotification(result.corsBlocked ? '✅ 已发出（CORS限制）' : ('✅ ' + (msgPreview||'触发成功')), 'success');
             } else {
-                payload = await resp.text();
+                this.__workerToast('❌ 触发失败 HTTP ' + result.status + '：' + msgPreview, 'warning', result.fullUrl, result.status, result.text);
+                this.showSimpleNotification('❌ 失败 HTTP ' + result.status + '：' + msgPreview, 'warning');
             }
-
-            const msg = formatMsg(payload, resp.ok);
-            notify(msg, resp.ok);
-        } catch (e) {
-            notify('❌ 触发失败：' + (e && e.message ? e.message : String(e)), false);
-        }
-    }
-
         } catch(e) {
+            this.__workerToast('❌ 触发失败：' + e.message, 'error', url + primaryEndpoint, null, e.message);
             this.showSimpleNotification('❌ 触发失败：' + e.message, 'error');
         }
     }
@@ -9712,29 +9710,74 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
             position: fixed;
             top: 20px;
             right: 20px;
-            background: ${colors[type]};
+            background: ${colors[type] || '#3b82f6'};
             color: white;
             padding: 16px 20px;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
             z-index: 2147483647;
-            max-width: 350px;
+            max-width: 400px;
+            word-break: break-all;
             animation: slideInRight 0.3s ease-out;
+            cursor: pointer;
         `;
         notification.textContent = message;
+        notification.title = '点击关闭';
+        notification.onclick = () => notification.remove();
         document.body.appendChild(notification);
 
         setTimeout(() => {
-            notification.style.animation = 'slideOutRight 0.3s ease-out';
-            setTimeout(() => notification.remove(), 300);
-        }, 5000);
+            try {
+                notification.style.animation = 'slideOutRight 0.3s ease-out';
+                setTimeout(() => { try { notification.remove(); } catch(_){} }, 300);
+            } catch(_){}
+        }, 6000);
     }
-}
+
+    // Worker专用详情toast（显示URL+状态码+返回内容）
+    __workerToast(title, type, url, status, body) {
+        try {
+            const colors = { success:'#10b981', warning:'#f59e0b', error:'#ef4444', info:'#3b82f6' };
+            const bg = colors[type] || '#3b82f6';
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position:fixed; bottom:20px; right:20px;
+                background:#fff; color:#111;
+                border-left:5px solid ${bg};
+                padding:14px 16px; border-radius:10px;
+                box-shadow:0 6px 24px rgba(0,0,0,0.22);
+                z-index:2147483647; max-width:460px; min-width:260px;
+                font-size:13px; line-height:1.6; word-break:break-all;
+                cursor:pointer;
+            `;
+            const safeStr = (s) => String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            toast.innerHTML = `
+                <div style="font-weight:700;font-size:14px;color:${bg};margin-bottom:6px">${safeStr(title)}</div>
+                ${url ? `<div style="color:#555;font-size:12px;margin-bottom:3px">🔗 URL：<code style="background:#f3f4f6;padding:1px 4px;border-radius:4px">${safeStr(url)}</code></div>` : ''}
+                ${status != null ? `<div style="color:#555;font-size:12px;margin-bottom:3px">📊 HTTP状态：<strong>${safeStr(status)}</strong></div>` : ''}
+                ${body ? `<div style="color:#555;font-size:12px;margin-bottom:4px">📄 响应：<code style="background:#f3f4f6;padding:1px 4px;border-radius:4px;display:inline-block;max-width:380px;overflow:hidden;text-overflow:ellipsis">${safeStr(String(body).slice(0,300))}</code></div>` : ''}
+                <div style="color:#aaa;font-size:11px;margin-top:4px">点击关闭</div>
+            `;
+            toast.onclick = () => toast.remove();
+            document.body.appendChild(toast);
+            setTimeout(() => { try { toast.remove(); } catch(_){} }, 12000);
+        } catch(e) {
+            // fallback
+            try { alert(title + (url ? '\nURL: ' + url : '') + (status != null ? '\nHTTP: ' + status : '') + (body ? '\n' + String(body).slice(0,200) : '')); } catch(_){}
+        }
+    }
 
 const FutureRadar = new FutureRadarSystemV3();
 window.FutureRadar = FutureRadar; // 暴露给插件使用
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => FutureRadar.init());
-else FutureRadar.init();
+// 防御性初始化：即使页面其他部分报错（如 AutoSaveManager 未定义），也确保本模块按钮可用
+(function() {
+    try {
+        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { try { FutureRadar.init(); } catch(e) { console.warn('[FutureRadar] init失败(忽略):', e); } });
+        else { try { FutureRadar.init(); } catch(e) { console.warn('[FutureRadar] init失败(忽略):', e); } }
+    } catch(e) {
+        console.warn('[FutureRadar] 初始化异常(忽略):', e);
+    }
+})();
 
 // 包装openModal函数以添加控制台日志
 (function() {
@@ -20895,7 +20938,7 @@ try {
                             // 显示警告提示框
                             const alertDiv = document.createElement('div');
                             alertDiv.className = 'alert alert-danger';
-                            alertDiv.style.cssText = 'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 2147483647; max-width: 600px; box-shadow: 0 4px 20px rgba(220,38,38,0.3);';
+                            alertDiv.style.cssText = 'position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 10000; max-width: 600px; box-shadow: 0 4px 20px rgba(220,38,38,0.3);';
                             alertDiv.innerHTML = /*XSS-Safe*/`
                                 <h4>🚨 强制复苏模式已启动</h4>
                                 <p><strong>触发原因：</strong>${forceReason}</p>
@@ -23332,7 +23375,7 @@ window.addEventListener('resize', function() {
                 // 创建数据对比分析界面
                 const modal = document.createElement('div');
                 modal.className = 'modal-overlay';
-                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2147483647;';
+                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
@@ -23515,7 +23558,7 @@ window.addEventListener('resize', function() {
                 // 创建高级报告生成界面
                 const modal = document.createElement('div');
                 modal.className = 'modal-overlay';
-                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2147483647;';
+                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 900px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
@@ -24057,7 +24100,7 @@ window.addEventListener('resize', function() {
 
                 // 创建恢复中心对话框
                 const modal = document.createElement('div');
-                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2147483647; display: flex; align-items: center; justify-content: center;';
+                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
 
                 // 获取所有备份
                 const backups = [];
@@ -24254,7 +24297,7 @@ window.addEventListener('resize', function() {
                 // 创建趋势分析模态框
                 const modal = document.createElement('div');
                 modal.className = 'modal-overlay';
-                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2147483647;';
+                modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;';
                 modal.innerHTML = `
                     <div class="modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto; background: white; border-radius: 12px; position: relative;">
                         <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; padding: 20px; border-bottom: 1px solid #e5e7eb;">
@@ -25288,7 +25331,7 @@ window.addEventListener('resize', function() {
                     
                     // 显示预览对话框
                     const modal = document.createElement('div');
-                    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2147483647; display: flex; align-items: center; justify-content: center;';
+                    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
                     
                     modal.innerHTML = `
                         <div style="background: white; border-radius: 12px; max-width: 800px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
@@ -25436,7 +25479,7 @@ window.addEventListener('resize', function() {
             
             // 创建选择界面
             const modal = document.createElement('div');
-            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2147483647; display: flex; align-items: center; justify-content: center; padding: 1rem;';
+            modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 1rem;';
             
             let checkboxesHTML = '';
             allKeys.forEach(date => {
@@ -27058,7 +27101,7 @@ window.TPIAdvanced = {
             const modal = document.createElement('div');
             modal.id = 'comparison-modal';
             modal.innerHTML = `
-                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2147483647;">
+                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                     <div style="background: white; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3 style="margin: 0; color: #1e40af;">📊 数据对比分析</h3>
@@ -27228,7 +27271,7 @@ window.TPIAdvanced = {
             const modal = document.createElement('div');
             modal.id = 'report-modal';
             modal.innerHTML = `
-                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 2147483647;">
+                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 10000;">
                     <div style="background: white; border-radius: 12px; padding: 24px; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3 style="margin: 0; color: #1e40af;">📝 生成TPI报告</h3>
@@ -27500,7 +27543,7 @@ ${startDate} 至 ${endDate}
             
             // 创建模态框
             const modalHtml = `
-                <div id="recovery-center-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2147483647; display: flex; align-items: center; justify-content: center;" onclick="this.remove()">
+                <div id="recovery-center-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;" onclick="this.remove()">
                     <div style="background: white; padding: 30px; border-radius: 12px; max-width: 700px; width: 90%; max-height: 85vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);" onclick="event.stopPropagation()">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                             <h3 style="margin: 0; color: #111827;">🔄 数据恢复中心</h3>
@@ -32920,7 +32963,7 @@ async function saveTodaysData() {
         font-weight: 600;
         color: #92400e;
         box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
-        z-index: 2147483647;
+        z-index: 10000;
         display: none;
         align-items: center;
         gap: 8px;
@@ -33450,7 +33493,7 @@ window.TPILoader = {
         top: 0; left: 0; right: 0; bottom: 0;
         background: rgba(0,0,0,0.5);
         backdrop-filter: blur(4px);
-        z-index: 2147483647;
+        z-index: 10000;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -33959,6 +34002,67 @@ try {
       window.__tpi_showToast_wrapped_for_storage = true;
     }
   }catch(e){}
+})();
+</script>
+
+<!-- ===== 未来事件雷达·Worker按钮防御性补丁 ===== -->
+<script>
+(function() {
+  'use strict';
+  // 确保FutureRadar上的Worker方法始终可用，防御AutoSaveManager等全局错误
+  function ensureWorkerMethods() {
+    try {
+      if (!window.FutureRadar) return;
+      var FR = window.FutureRadar;
+
+      // 如果 __workerToast 不存在，注入它
+      if (typeof FR.__workerToast !== 'function') {
+        FR.__workerToast = function(title, type, url, status, body) {
+          try {
+            var colors = { success:'#10b981', warning:'#f59e0b', error:'#ef4444', info:'#3b82f6' };
+            var bg = colors[type] || '#3b82f6';
+            var toast = document.createElement('div');
+            toast.style.cssText = 'position:fixed;bottom:20px;right:20px;background:#fff;color:#111;border-left:5px solid '+bg+';padding:14px 16px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.22);z-index:2147483647;max-width:460px;min-width:260px;font-size:13px;line-height:1.6;word-break:break-all;cursor:pointer;';
+            var safeStr = function(s){ return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+            toast.innerHTML = '<div style="font-weight:700;font-size:14px;color:'+bg+';margin-bottom:6px">'+safeStr(title)+'</div>'
+              + (url ? '<div style="color:#555;font-size:12px;margin-bottom:3px">🔗 URL：<code style="background:#f3f4f6;padding:1px 4px;border-radius:4px">'+safeStr(url)+'</code></div>' : '')
+              + (status != null ? '<div style="color:#555;font-size:12px;margin-bottom:3px">📊 HTTP状态：<strong>'+safeStr(status)+'</strong></div>' : '')
+              + (body ? '<div style="color:#555;font-size:12px;margin-bottom:4px">📄 响应：<code style="background:#f3f4f6;padding:1px 4px;border-radius:4px;display:inline-block;max-width:360px;overflow:hidden;text-overflow:ellipsis">'+safeStr(String(body).slice(0,300))+'</code></div>' : '')
+              + '<div style="color:#aaa;font-size:11px;margin-top:4px">点击关闭</div>';
+            toast.onclick = function(){ toast.remove(); };
+            document.body.appendChild(toast);
+            setTimeout(function(){ try{ toast.remove(); }catch(_){} }, 12000);
+          } catch(e) {
+            try{ alert(title + (url?'\nURL: '+url:'') + (status!=null?'\nHTTP: '+status:'') + (body?'\n'+String(body).slice(0,200):'')); }catch(_){}
+          }
+        };
+      }
+
+      // 如果 showSimpleNotification 不存在，注入它
+      if (typeof FR.showSimpleNotification !== 'function') {
+        FR.showSimpleNotification = function(message, type) {
+          var colors = { success:'#10b981', warning:'#f59e0b', error:'#ef4444', info:'#3b82f6' };
+          var n = document.createElement('div');
+          n.style.cssText = 'position:fixed;top:20px;right:20px;background:'+(colors[type||'info']||'#3b82f6')+';color:white;padding:16px 20px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:2147483647;max-width:400px;word-break:break-all;cursor:pointer;';
+          n.textContent = message;
+          n.onclick = function(){ n.remove(); };
+          document.body.appendChild(n);
+          setTimeout(function(){ try{ n.remove(); }catch(_){} }, 6000);
+        };
+      }
+    } catch(e) {
+      console.warn('[WorkerPatch] ensureWorkerMethods失败(忽略):', e);
+    }
+  }
+
+  // 立即执行一次
+  try { ensureWorkerMethods(); } catch(_){}
+  // DOMContentLoaded后再执行一次
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function(){ try{ ensureWorkerMethods(); }catch(_){} });
+  }
+  // 500ms后兜底再执行一次（防止其他脚本覆盖）
+  setTimeout(function(){ try{ ensureWorkerMethods(); }catch(_){} }, 500);
 })();
 </script>
 
