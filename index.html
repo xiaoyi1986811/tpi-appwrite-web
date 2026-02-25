@@ -2,6 +2,7 @@
 
 <html lang="zh-CN">
 <head>
+<meta charset="utf-8"/>
 
 <script>
 // === IndexedDB 配额初始化（替代 localStorage 5MB 基准）===
@@ -2383,7 +2384,6 @@ window.exportAsMarkdown = function () {
 <!-- 性能优化: DNS预解析和预连接 -->
 <link crossorigin="" href="https://cdn.jsdelivr.net" rel="preconnect"/>
 <link href="https://cdn.jsdelivr.net" rel="dns-prefetch"/>
-<meta charset="utf-8"/>
 <!-- 性能优化 -->
 <link href="https://fonts.googleapis.com" rel="preconnect"/>
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
@@ -3805,7 +3805,7 @@ window.exportReportComplete = function(format) {
 .radar-attach-list{ font-style:italic; }
 </style>
 
-</head>
+<\/head>
                 <body>
                     ${reportContent.innerHTML}
                 
@@ -4721,7 +4721,7 @@ window.__tpi_legacy_exportDataComplete_3 = function(format) {
      .metric-value{font-size:24px;font-weight:bold;color:#2563eb;}
      .footer{text-align:center;margin-top:30px;padding-top:20px;border-top:1px solid #e5e7eb;color:#666;font-size:12px;}
     </style>
-</head>
+<\/head>
 <body>
     <div class="container">
         <h1>📊 TPI效能数据报告</h1>
@@ -4790,7 +4790,7 @@ window.__tpi_legacy_exportDataComplete_3 = function(format) {
             TPI全维效能管理系统 | 数据日期: ${dateStr} | 导出时间: ${htmlExportTimeStr}
         </div>
     </div>
-</body>
+<\/body>
 </html>`;
                 fileName += '.html';
                 mimeType = 'text/html';
@@ -4863,7 +4863,7 @@ window.__tpi_legacy_exportDataComplete_3 = function(format) {
     .modal-footer { padding: 15px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; }
     .modal-button { padding: 8px 16px; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; }
      @page{size:A4;margin:2cm;}*{margin:0;padding:0;box-sizing:border-box;}body{font-family:'Microsoft YaHei', Arial, sans-serif;line-height:1.6;color:#333;background:white;}.container{max-width:800px;margin:0 auto;padding:40px;}.header{text-align:center;margin-bottom:40px;padding-bottom:20px;border-bottom:3px solid #2563eb;}h1{color:#2563eb;font-size:32px;margin-bottom:10px;}.date{color:#6b7280;font-size:16px;}.section{margin:30px 0;}h2{color:#1f2937;font-size:24px;margin-bottom:15px;padding-left:10px;border-left:4px solid #2563eb;}.metrics-grid{display:grid;grid-template-columns:repeat(2, 1fr);gap:20px;margin:20px 0;}.metric-card{background:#f9fafb;padding:20px;border-radius:8px;border:1px solid #e5e7eb;}.metric-label{color:#6b7280;font-size:14px;margin-bottom:8px;}.metric-value{color:#1f2937;font-size:28px;font-weight:bold;}.metric-unit{color:#9ca3af;font-size:14px;margin-left:5px;}table{width:100%;border-collapse:collapse;margin:20px 0;}th, td{padding:12px;text-align:left;border-bottom:1px solid #e5e7eb;}th{background:#f3f4f6;color:#374151;font-weight:600;}tr:hover{background:#f9fafb;}.footer{margin-top:40px;padding-top:20px;border-top:1px solid #e5e7eb;text-align:center;color:#9ca3af;font-size:12px;}.print-btn{position:fixed;top:20px;right:20px;padding:12px 24px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);}.print-btn:hover{background:#1d4ed8;}@media print{.print-btn{display:none;}body{print-color-adjust:exact;-webkit-print-color-adjust:exact;}}</style>
-</head>
+<\/head>
 <body>
     <button class="print-btn" onclick="window.print()">🖨️ 打印/保存为PDF</button>
 
@@ -6036,7 +6036,7 @@ window.exportAsCSV = function() {
 <!-- ==================== GitHub云端同步模块 (第30版新增) ==================== -->
 <div class="container">
 <section class="card fade-in" id="cloud-sync-section">
-<div class="card-header" onclick="window.TPI && window.TPI.toggleCard ? window.TPI.toggleCard('cloud-sync-section') : null">
+<div class="card-header" onclick="window.TPI &amp;&amp; window.TPI.toggleCard ? window.TPI.toggleCard('cloud-sync-section') : null">
   <div class="card-title">
     <span class="icon">☁️</span>
     <span>云端同步 Cloud Sync (TPI+ 后端)</span>
@@ -6079,7 +6079,7 @@ window.exportAsCSV = function() {
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     <span style="font-weight:600; color:#374151;">同步日期:</span>
     <input id="tpi-sync-date" type="date" style="padding:8px 10px; border:2px solid #e5e7eb; border-radius:8px; font-size:14px;">
-    <button type="button" onclick="try{document.getElementById('tpi-sync-date').value=(new Date()).toISOString().split('T')[0]; window.__tpi_syncDateToMain && window.__tpi_syncDateToMain();}catch(e){}" style="padding:8px 12px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; cursor:pointer; font-weight:600;">
+    <button type="button" onclick="try{document.getElementById('tpi-sync-date').value=(new Date()).toISOString().split('T')[0]; window.__tpi_syncDateToMain &amp;&amp; window.__tpi_syncDateToMain();}catch(e){}" style="padding:8px 12px; background:#f3f4f6; border:1px solid #e5e7eb; border-radius:8px; cursor:pointer; font-weight:600;">
       今日
     </button>
   </div>
@@ -6108,7 +6108,7 @@ window.exportAsCSV = function() {
 </section>
 <div class="container">
      <section class="card fade-in stagger-2" id="misc-log-section">
-      <div class="card-header" onclick="window.TPI && window.TPI.toggleCard ? window.TPI.toggleCard('misc-log-section') : null">
+      <div class="card-header" onclick="window.TPI &amp;&amp; window.TPI.toggleCard ? window.TPI.toggleCard('misc-log-section') : null">
        <div class="card-title">
         <span class="icon">🗒️</span>
         <span>杂事记录 · 快速备忘 (Misc Log)</span>
@@ -6123,8 +6123,8 @@ window.exportAsCSV = function() {
          </div>
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-         <button class="btn btn-primary" type="button" onclick="window.MiscLog && window.MiscLog.openAdd()">➕ 新增记录</button>
-         <button class="btn btn-secondary" type="button" onclick="window.MiscLog && window.MiscLog.deleteSelected()">🗑️ 批量删除</button>
+         <button class="btn btn-primary" type="button" onclick="window.MiscLog &amp;&amp; window.MiscLog.openAdd()">➕ 新增记录</button>
+         <button class="btn btn-secondary" type="button" onclick="window.MiscLog &amp;&amp; window.MiscLog.deleteSelected()">🗑️ 批量删除</button>
         </div>
        </div>
 
@@ -6133,7 +6133,7 @@ window.exportAsCSV = function() {
 
        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom: 10px;">
         <label style="display:flex; align-items:center; gap:8px; font-size:13px;">
-         <input id="misc-log-select-all" type="checkbox" onchange="window.MiscLog && window.MiscLog.toggleSelectAll(this.checked)"/>
+         <input id="misc-log-select-all" type="checkbox" onchange="window.MiscLog &amp;&amp; window.MiscLog.toggleSelectAll(this.checked)"/>
          <span>全选</span>
         </label>
         <div style="font-size:12px; color:#64748b;">
@@ -12419,7 +12419,7 @@ else FutureRadar.init();
 <span class="tpi-u-52360e">
                   输入 (x3.0)
                  </span>
-</input></label>
+</label>
 <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; padding: 6px 12px; background: white; border: 2px solid #e5e7eb; border-radius: 6px; transition: all 0.2s;">
 <input class="tpi-u-cur-pointer" name="field-l-mode-morning" onchange="updateFieldLMultiplier('morning')" type="radio" value="output"/>
 <span class="tpi-u-52360e">
@@ -12610,7 +12610,7 @@ else FutureRadar.init();
 <span class="tpi-u-52360e">
                   输出 (x3.0)
                  </span>
-</input></label>
+</label>
 <div style="flex: 1; min-width: 150px;">
 <div class="tpi-u-56b362" id="field-l-multiplier-afternoon">
                   当前: x2.0
@@ -12802,7 +12802,7 @@ else FutureRadar.init();
 <span class="tpi-u-52360e">
                   输出 (x3.0)
                  </span>
-</input></label>
+</label>
 <div style="flex: 1; min-width: 150px;">
 <div class="tpi-u-56b362" id="field-l-multiplier-evening1">
                   当前: x2.0
@@ -12994,7 +12994,7 @@ else FutureRadar.init();
 <span class="tpi-u-52360e">
                   输出 (x3.0)
                  </span>
-</input></label>
+</label>
 <div style="flex: 1; min-width: 150px;">
 <div class="tpi-u-56b362" id="field-l-multiplier-morning-2">
                   当前: x2.0
@@ -13184,7 +13184,7 @@ else FutureRadar.init();
 <span class="tpi-u-52360e">
                   输出 (x3.0)
                  </span>
-</input></label>
+</label>
 <div style="flex: 1; min-width: 150px;">
 <div class="tpi-u-56b362" id="field-l-multiplier-flexible">
                   当前: x3.0
@@ -23909,7 +23909,7 @@ window.addEventListener('resize', function() {
                         <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:#f8fafc;border-bottom:1px solid #e2e8f0;flex-shrink:0;">
                             <h3 style="margin:0;font-size:18px;color:#1e293b;">👁️ 报告预览</h3>
                             <div style="display:flex;gap:10px;">
-                                <button onclick="(function(){var p=document.getElementById('tpi-preview-body');if(p){var w=window.open('','_blank');if(w){w.document.write('<html><head><meta charset="UTF-8"><title>TPI报告预览</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:20px;}h2{color:#2563eb;}table{width:100%;border-collapse:collapse;margin:20px 0;}th,td{padding:10px;border:1px solid #e5e7eb;}th{background:#f3f4f6;}.btn{padding:10px 20px;margin:10px 5px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff;}</style></head><body>'+p.innerHTML+'<div style=text-align:center;margin-top:30px><button class=btn onclick=window.print()>🖨️ 打印</button><button class=btn onclick=window.close()>关闭</button></div></body></html>');w.document.close();}}})()" style="padding:6px 14px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;color:#334155;transition:all 0.15s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'">🌐 新窗口打开</button>
+                                <button onclick="(function(){var p=document.getElementById('tpi-preview-body');if(p){var w=window.open('','_blank');if(w){w.document.write('<html><head><meta charset="UTF-8"><title>TPI报告预览</title><style>body{font-family:Arial,sans-serif;max-width:900px;margin:40px auto;padding:20px;}h2{color:#2563eb;}table{width:100%;border-collapse:collapse;margin:20px 0;}th,td{padding:10px;border:1px solid #e5e7eb;}th{background:#f3f4f6;}.btn{padding:10px 20px;margin:10px 5px;cursor:pointer;border:1px solid #ccc;border-radius:6px;background:#fff;}</style><\/head><body>'+p.innerHTML+'<div style=text-align:center;margin-top:30px><button class=btn onclick=window.print()>🖨️ 打印</button><button class=btn onclick=window.close()>关闭</button></div><\/body></html>');w.document.close();}}})()" style="padding:6px 14px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer;font-size:13px;color:#334155;transition:all 0.15s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='#fff'">🌐 新窗口打开</button>
                                 <button onclick="document.getElementById('tpi-preview-modal').remove()" style="padding:6px 14px;border:none;border-radius:6px;background:#ef4444;color:#fff;cursor:pointer;font-size:13px;font-weight:600;transition:background 0.15s;" onmouseover="this.style.background='#dc2626'" onmouseout="this.style.background='#ef4444'">✕ 关闭</button>
                             </div>
                         </div>
@@ -24624,7 +24624,7 @@ window.addEventListener('resize', function() {
     .modal-footer { padding: 15px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; }
     .modal-button { padding: 8px 16px; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; }
      body{font-family:Arial, sans-serif;padding:20px;max-width:800px;margin:0 auto;}h1, h2, h3{color:#2563eb;}table{width:100%;border-collapse:collapse;margin:20px 0;}th, td{border:1px solid #ddd;padding:8px;text-align:left;}th{background-color:#f3f4f6;}@media print{body{padding:10mm;}}</style>
-                    </head>
+                    <\/head>
                     <body>
 
         <div id="score-dashboard" style="background: linear-gradient(135deg, #e0e7ff 0%, #ddd6fe 100%); padding: 8px 16px; border-radius: 0; margin: 0; color: #1e293b; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
@@ -24667,7 +24667,7 @@ window.addEventListener('resize', function() {
             </div>
 
                         ${reportContent.innerHTML}
-                    </body>
+                    <\/body>
                     </html>
                 `);
                 printWindow.document.close();
@@ -24964,7 +24964,7 @@ window.addEventListener('resize', function() {
                 filename = 'TPI_数据导出_' + new Date().toISOString().split('T')[0] + '.csv';
                 mimeType = 'text/csv';
             } else if (format === 'html') {
-                let html = `<html><head><meta charset="UTF-8"><title>TPI数据导出</title></head><body>
+                let html = `<html><head><meta charset="UTF-8"><title>TPI数据导出</title><\/head><body>
 
         <div id="score-dashboard" style="background: linear-gradient(135deg, #e0e7ff 0%, #ddd6fe 100%); padding: 8px 16px; border-radius: 0; margin: 0; color: #1e293b; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
             <div style="max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: nowrap;">
@@ -25013,7 +25013,7 @@ window.addEventListener('resize', function() {
                 for (let key in allData) {
                     html += '<tr><td>' + key + '</td><td><pre>' + allData[key] + '</pre></td></tr>';
                 }
-                html += '</table></body></html>';
+                html += '</table><\/body></html>';
                 dataStr = html;
                 filename = 'TPI_数据导出_' + new Date().toISOString().split('T')[0] + '.html';
                 mimeType = 'text/html';
@@ -26213,7 +26213,7 @@ console.log('✅ 全局函数已定义: copyPreviousDayDataComplete, archiveOldD
     .modal-footer { padding: 15px 20px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 10px; }
     .modal-button { padding: 8px 16px; border-radius: 6px; cursor: pointer; border: none; font-weight: 600; }
     body{font-family:Arial;margin:20px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background-color:#4CAF50;color:white;}</style>`;
-html += `</head><body>
+html += `<\/head><body>
 
         <div id="score-dashboard" style="background: linear-gradient(135deg, #e0e7ff 0%, #ddd6fe 100%); padding: 8px 16px; border-radius: 0; margin: 0; color: #1e293b; box-shadow: 0 2px 6px rgba(0,0,0,0.1);">
             <div style="max-width: 1400px; margin: 0 auto; display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: nowrap;">
@@ -26259,7 +26259,7 @@ html += `</head><body>
                             const date = key.replace('tpi_data_', '');
                             html += `<tr><td>${date}</td><td><pre>${allData[key]}</pre></td></tr>`;
                         }
-                        html += '</table></body></html>';
+                        html += '</table><\/body></html>';
                         const blob = new Blob([html], { type: 'text/html' });
                         const url = URL.createObjectURL(blob);
                         const a = document.createElement('a');
@@ -32053,7 +32053,7 @@ function loadMainInterface() {
     try{
       if (typeof window.setLoggedInUI === 'function') {
         // 如果你页面已有“tpi-username”输入框，则用它做显示名
-        const email = (document.getElementById('tpi-username') && document.getElementById('tpi-username').value) ? document.getElementById('tpi-username').value : '';
+        const email = (document.getElementById('tpi-username') &amp;&amp; document.getElementById('tpi-username').value) ? document.getElementById('tpi-username').value : '';
         window.setLoggedInUI(email);
       } else {
         // 兜底：如果你页面是 tpi-auth-panel / tpi-sync-panel
@@ -32116,7 +32116,7 @@ window.addEventListener('beforeunload', async (e) => {
         const today = getTodayString();
         if (typeof window.collectDailyData === 'function') {
             const obj = window.collectDailyData();
-            const snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+            const snapshot = obj &amp;&amp; obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
             if (snapshot) {
                 __tpi_ls_set('tpi_unsaved_data_' + today, JSON.stringify(snapshot));
                 __tpi_ls_set('tpi_unsaved_timestamp', new Date().toISOString());
@@ -32134,7 +32134,7 @@ window.checkUnsavedData = async function() {
     const unsavedData = __tpi_ls_get('tpi_unsaved_data_' + today);
     const timestamp = __tpi_ls_get('tpi_unsaved_timestamp');
     
-    if (unsavedData && timestamp) {
+    if (unsavedData &amp;&amp; timestamp) {
         const unsavedTime = new Date(timestamp);
         const now = new Date();
         const minutesDiff = (now - unsavedTime) / 1000 / 60;
@@ -32217,10 +32217,10 @@ async function loadTodaysData() {
               if (typeof cloudData === 'string') {
                 const parsed = JSON.parse(cloudData);
                 // ✅ 支持压缩包装格式（tpi_cloud_v3）
-                if (parsed && typeof parsed === 'object' && (parsed.schema === 'tpi_cloud_v3' || parsed.schema === 'tpi_cloud_v2')) {
+                if (parsed &amp;&amp; typeof parsed === 'object' &amp;&amp; (parsed.schema === 'tpi_cloud_v3' || parsed.schema === 'tpi_cloud_v2')) {
                   const payload = parsed.payload;
                   let jsonStr = null;
-                  if (parsed.compressed && window.TPIDataCompression && typeof window.TPIDataCompression.decompressString === 'function') {
+                  if (parsed.compressed &amp;&amp; window.TPIDataCompression &amp;&amp; typeof window.TPIDataCompression.decompressString === 'function') {
                     jsonStr = window.TPIDataCompression.decompressString(payload);
                   } else {
                     jsonStr = (typeof payload === 'string') ? payload : JSON.stringify(payload || {});
@@ -32244,7 +32244,7 @@ async function loadTodaysData() {
                     }
                     const raw = JSON.stringify(snapshot || {});
                     const got = __tpi_fnv1a32(raw);
-                    if (parsed.checksum && got !== String(parsed.checksum)) {
+                    if (parsed.checksum &amp;&amp; got !== String(parsed.checksum)) {
                       console.warn('⚠️ [云端同步] 校验和不一致：可能数据被截断/损坏', {expected: parsed.checksum, got});
                     }
                   }catch(e){}
@@ -32273,14 +32273,14 @@ async function loadTodaysData() {
               }
             }
 
-            if (snapshot && typeof window.restoreUIFromData === 'function') {
+            if (snapshot &amp;&amp; typeof window.restoreUIFromData === 'function') {
                 console.log('🔄 [云端同步] 开始恢复UI数据...');
                 window.restoreUIFromData(snapshot);
                 console.log('✅ [云端同步] 数据已成功加载并恢复到页面');
                 
                 // 🔥 保障3：触发分数重新计算确保显示正确
                 try {
-                  if (typeof window.TPI !== 'undefined' && typeof window.TPI.calculateSystem === 'function') {
+                  if (typeof window.TPI !== 'undefined' &amp;&amp; typeof window.TPI.calculateSystem === 'function') {
                     window.TPI.calculateSystem();
                     console.log('✅ [云端同步] 分数已重新计算');
                   }
@@ -32303,7 +32303,7 @@ async function loadTodaysData() {
             if (backup) {
               try {
                 const snapshot = JSON.parse(backup);
-                if (snapshot && typeof window.restoreUIFromData === 'function') {
+                if (snapshot &amp;&amp; typeof window.restoreUIFromData === 'function') {
                   window.restoreUIFromData(snapshot);
                   console.log('✅ [云端同步] 使用本地备份数据恢复');
                   alert('✅ 已从本地备份恢复数据');
@@ -32336,7 +32336,7 @@ async function saveTodaysData() {
     try{
       if (typeof window.collectDailyData === 'function') {
         const obj = window.collectDailyData();
-        snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+        snapshot = obj &amp;&amp; obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
         console.log('📦 [云端同步] 收集到的快照数据:', snapshot);
       } else {
         console.error('❌ [云端同步] collectDailyData 函数不存在');
@@ -32369,9 +32369,9 @@ async function saveTodaysData() {
       const prevRaw = __tpi_ls_get('tpi_last_snapshot_' + today);
       if (prevRaw) {
         const prevObj = JSON.parse(prevRaw);
-        if (window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function') {
+        if (window.TPIIncrementalSync &amp;&amp; typeof window.TPIIncrementalSync.calculateDiff === 'function') {
           const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshot);
-          if (diffObj && typeof diffObj === 'object') changedKeys = Object.keys(diffObj);
+          if (diffObj &amp;&amp; typeof diffObj === 'object') changedKeys = Object.keys(diffObj);
         } else {
           // 兜底：浅比较
           Object.keys(snapshot||{}).forEach(k=>{ try{ if (JSON.stringify(prevObj?.[k]) !== JSON.stringify(snapshot[k])) changedKeys.push(k); }catch(_){ changedKeys.push(k); } });
@@ -32386,7 +32386,7 @@ async function saveTodaysData() {
 
     let compressed = null;
     try{
-      if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
+      if (window.TPIDataCompression &amp;&amp; typeof window.TPIDataCompression.compressString === 'function'){
         compressed = window.TPIDataCompression.compressString(rawJson);
       }
     }catch(e){ compressed = null; }
@@ -32395,7 +32395,7 @@ async function saveTodaysData() {
       schema: 'tpi_cloud_v3',
       date: today,
       updatedAt: new Date().toISOString(),
-      deviceId: (window.TPIConflictResolver && typeof window.TPIConflictResolver.getDeviceId === 'function') ? window.TPIConflictResolver.getDeviceId() : (__tpi_ls_get('tpi_device_id') || ''),
+      deviceId: (window.TPIConflictResolver &amp;&amp; typeof window.TPIConflictResolver.getDeviceId === 'function') ? window.TPIConflictResolver.getDeviceId() : (__tpi_ls_get('tpi_device_id') || ''),
       changedKeys: changedKeys.slice(0, 300),
       checksum: checksum,
       compressed: !!compressed,
@@ -32452,7 +32452,7 @@ async function saveTodaysData() {
             Appwrite.Query.limit(1)
         ]);
         
-        if (verifyDocs.documents.length > 0 && verifyDocs.documents[0].data) {
+        if (verifyDocs.documents.length > 0 &amp;&amp; verifyDocs.documents[0].data) {
           const savedDataStr = verifyDocs.documents[0].data;
           console.log('✅ [云端同步] 回读验证成功，数据长度:', savedDataStr.length);
           
@@ -32558,7 +32558,7 @@ async function saveTodaysData() {
     // ✅ 数据压缩：优先使用 lz-string（体积更小），否则降级到 btoa/base64
     compressString: function(str){
       try{
-        if (window.LZString && typeof window.LZString.compressToUTF16 === 'function') {
+        if (window.LZString &amp;&amp; typeof window.LZString.compressToUTF16 === 'function') {
           return { algo:'lzutf16', payload: window.LZString.compressToUTF16(String(str||'')) };
         }
       }catch(e){}
@@ -32570,10 +32570,10 @@ async function saveTodaysData() {
     },
     decompressString: function(objOrStr){
       try{
-        if (objOrStr && typeof objOrStr === 'object' && objOrStr.algo && objOrStr.payload != null){
+        if (objOrStr &amp;&amp; typeof objOrStr === 'object' &amp;&amp; objOrStr.algo &amp;&amp; objOrStr.payload != null){
           const algo = objOrStr.algo;
           const payload = objOrStr.payload;
-          if (algo === 'lzutf16' && window.LZString && typeof window.LZString.decompressFromUTF16 === 'function'){
+          if (algo === 'lzutf16' &amp;&amp; window.LZString &amp;&amp; typeof window.LZString.decompressFromUTF16 === 'function'){
             return window.LZString.decompressFromUTF16(String(payload||'')) || '';
           }
           if (algo === 'b64uri'){
@@ -32847,9 +32847,9 @@ async function saveTodaysData() {
     
     addToQueue: function(operation) {
       const now = Date.now();
-      const op = (operation && typeof operation === 'object') ? operation : { type: 'unknown' };
+      const op = (operation &amp;&amp; typeof operation === 'object') ? operation : { type: 'unknown' };
       const priority = (typeof op.priority === 'number') ? op.priority : 0;
-      const ttlDays = (typeof op.ttlDays === 'number' && op.ttlDays > 0) ? op.ttlDays : 7;
+      const ttlDays = (typeof op.ttlDays === 'number' &amp;&amp; op.ttlDays > 0) ? op.ttlDays : 7;
       const expiresAt = op.expiresAt || (now + ttlDays * 24 * 60 * 60 * 1000);
       this.syncQueue.push({
         ...op,
@@ -32925,7 +32925,7 @@ async function saveTodaysData() {
           try{
             if (window.tpiToast) window.tpiToast(`📤 离线队列同步中：${idx}/${total}（剩余 ${total-idx}）`, 'info');
           }catch(e){}
-          if (item && item.type === 'save_date' && item.date && typeof window.saveDateData === 'function') {
+          if (item &amp;&amp; item.type === 'save_date' &amp;&amp; item.date &amp;&amp; typeof window.saveDateData === 'function') {
             await window.saveDateData(item.date);
           } else if (typeof window.saveTodaysData === 'function') {
             await window.saveTodaysData();
@@ -32962,7 +32962,7 @@ async function saveTodaysData() {
       if (localTime === cloudTime) return null;
       
       // 如果设备不同且时间接近(5分钟内)，可能存在冲突
-      if (localDevice !== cloudDevice && Math.abs(localTime - cloudTime) < 5 * 60 * 1000) {
+      if (localDevice !== cloudDevice &amp;&amp; Math.abs(localTime - cloudTime) < 5 * 60 * 1000) {
         return {
           type: 'concurrent_edit',
           localTime: new Date(localTime),
@@ -33314,7 +33314,7 @@ async function saveTodaysData() {
     remove: function(toast) {
       toast.style.transform = 'translateX(calc(100% + 40px))';
       setTimeout(function() { 
-        if (toast && toast.parentNode) {
+        if (toast &amp;&amp; toast.parentNode) {
           toast.parentNode.removeChild(toast);
         }
       }, 300);
@@ -33412,7 +33412,7 @@ window.TPILoader = {
       var backdrop = loader.querySelector('div');
       if (backdrop) backdrop.style.opacity = '0';
       setTimeout(function() { 
-        if (loader && loader.parentNode) {
+        if (loader &amp;&amp; loader.parentNode) {
           loader.parentNode.removeChild(loader);
         }
       }, 200);
@@ -33448,7 +33448,7 @@ document.addEventListener('DOMContentLoaded', function() {
           var result = await originalSave.apply(this, arguments);
           TPILoader.hide();
           
-          if (result && result.success !== false) {
+          if (result &amp;&amp; result.success !== false) {
             TPIToast.success('✅ 数据已成功上传到云端');
           }
           
@@ -33473,7 +33473,7 @@ document.addEventListener('DOMContentLoaded', function() {
           var result = await originalLoad.apply(this, arguments);
           TPILoader.hide();
           
-          if (result && result.success !== false) {
+          if (result &amp;&amp; result.success !== false) {
             TPIToast.success('✅ 数据已成功从云端加载');
           }
           
@@ -33535,7 +33535,7 @@ window.__tpiDirectExport = function(fmt) {
 
   /* ── 1. 当前日期 ── */
   var dateEl = document.getElementById('date-input') || document.querySelector('input[type="date"]');
-  var date = (dateEl && dateEl.value) ? dateEl.value : (function(){
+  var date = (dateEl &amp;&amp; dateEl.value) ? dateEl.value : (function(){
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   })();
@@ -33552,7 +33552,7 @@ window.__tpiDirectExport = function(fmt) {
 
     if (/token|secret|password|pat/i.test(id) || type === 'password' || type === 'hidden') return;
     if (id === 'date-input') return;
-    if (el.closest && el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
+    if (el.closest &amp;&amp; el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
 
     if (type === 'checkbox') {
       if (id === 'misc-log-select-all') return;
@@ -33595,7 +33595,7 @@ window.__tpiDirectExport = function(fmt) {
     var el = document.getElementById(p[0]);
     if (!el) return;
     var v = (el.tagName === 'INPUT' || el.tagName === 'SELECT') ? el.value : el.textContent.trim();
-    if (v && v !== '' && v !== '0' && v !== '0.0') scoreMap[p[1]] = v;
+    if (v &amp;&amp; v !== '' &amp;&amp; v !== '0' &amp;&amp; v !== '0.0') scoreMap[p[1]] = v;
   });
 
   [
@@ -33612,7 +33612,7 @@ window.__tpiDirectExport = function(fmt) {
     var el = document.getElementById(p[0]);
     if (!el) return;
     var v = el.textContent.trim().replace(/\s+/g,' ');
-    if (v && v !== '' && v !== '-' && v !== '0' && v !== '0.0') scoreMap[p[1]] = v;
+    if (v &amp;&amp; v !== '' &amp;&amp; v !== '-' &amp;&amp; v !== '0' &amp;&amp; v !== '0.0') scoreMap[p[1]] = v;
   });
 
   /* 顶栏看板 ts-* 前缀（Appwrite版专有） */
@@ -33624,19 +33624,19 @@ window.__tpiDirectExport = function(fmt) {
     var el = document.getElementById(p[0]);
     if (!el) return;
     var v = el.textContent.trim().replace(/\s+/g,' ');
-    if (v && v !== '' && v !== '-' && v !== '0' && v !== '0.0') scoreMap[p[1]] = v;
+    if (v &amp;&amp; v !== '' &amp;&amp; v !== '-' &amp;&amp; v !== '0' &amp;&amp; v !== '0.0') scoreMap[p[1]] = v;
   });
 
   /* ── 4. 杂记 ── */
   var miscRecords = [];
   try {
-    if (window.appData && window.appData.misc && window.appData.misc[date]) {
+    if (window.appData &amp;&amp; window.appData.misc &amp;&amp; window.appData.misc[date]) {
       miscRecords = window.appData.misc[date];
     } else {
       var miscRaw = null;
       var miscTA = document.getElementById('misc-records-json');
-      if (miscTA && miscTA.value) miscRaw = miscTA.value;
-      if (!miscRaw && typeof window.__tpi_ls_get === 'function') miscRaw = window.__tpi_ls_get('tpi_misc_records_' + date);
+      if (miscTA &amp;&amp; miscTA.value) miscRaw = miscTA.value;
+      if (!miscRaw &amp;&amp; typeof window.__tpi_ls_get === 'function') miscRaw = window.__tpi_ls_get('tpi_misc_records_' + date);
       if (miscRaw) { var parsed = JSON.parse(miscRaw); if (Array.isArray(parsed)) miscRecords = parsed; }
     }
     if (miscRecords.length === 0) {
@@ -33644,7 +33644,7 @@ window.__tpiDirectExport = function(fmt) {
       if (logList) {
         logList.querySelectorAll('.misc-log-body, .misc-log-content').forEach(function(el) {
           var t = el.textContent.trim();
-          if (t && t.length > 2) miscRecords.push({ text: t, _fromDOM: true });
+          if (t &amp;&amp; t.length > 2) miscRecords.push({ text: t, _fromDOM: true });
         });
       }
     }
@@ -33653,7 +33653,7 @@ window.__tpiDirectExport = function(fmt) {
   /* ── 5. Future Radar ── */
   var radarEvents = { tempLife: [], tempAcademic: [], regularLife: [], regularAcademic: [] };
   try {
-    if (window.appData && window.appData.radar) {
+    if (window.appData &amp;&amp; window.appData.radar) {
       radarEvents = window.appData.radar;
     } else {
       ['tempLife','tempAcademic','regularLife','regularAcademic'].forEach(function(key) {
@@ -33675,7 +33675,7 @@ window.__tpiDirectExport = function(fmt) {
   /* ── 6. contenteditable 富文本 ── */
   var richTexts = [];
   document.querySelectorAll('[contenteditable="true"]').forEach(function(el) {
-    if (el.closest && el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
+    if (el.closest &amp;&amp; el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
     var id = el.id || '';
     var label = el.getAttribute('aria-label') || id || el.getAttribute('placeholder') || '富文本';
     var content = (el.innerText || el.textContent || '').trim();
@@ -33706,7 +33706,7 @@ window.__tpiDirectExport = function(fmt) {
       times: times, texts: texts, miscRecords: miscRecords, radarEvents: radarEvents
     };
     download(JSON.stringify(payload, null, 2), 'TPI_'+date+'_'+ts()+'.json', 'application/json;charset=utf-8');
-    var filledTA = textareas.filter(function(t){ return t.value && t.value.trim(); });
+    var filledTA = textareas.filter(function(t){ return t.value &amp;&amp; t.value.trim(); });
     var radarTotal = Object.values(radarEvents).reduce(function(a,b){ return a+(b?b.length:0); },0);
     alert('✅ JSON 导出成功！\n文本框：'+filledTA.length+' 个有内容\n分数项：'+Object.keys(scoreMap).length+' 项\n杂记：'+miscRecords.length+' 条\n雷达事件：'+radarTotal+' 条');
   } else {
