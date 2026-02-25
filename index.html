@@ -7352,7 +7352,7 @@ window.exportAsCSV = function() {
           🔔 PushPlus配置
          </button>
 <button class="settings-tab tpi-u-dc3df4" id="settings-tab-worker" onclick="FutureRadar.switchSettingsTab('worker')">
-          ☁️ 后台推送Worker
+          ☁️ 后台Worker
          </button>
 <button class="settings-tab tpi-u-dc3df4" id="settings-tab-import" onclick="FutureRadar.switchSettingsTab('import')">
           📥 爬虫导入
@@ -7376,34 +7376,25 @@ window.exportAsCSV = function() {
            注册并获取您的专属Token
           </p>
 </div>
-<!-- ✅ 新增：测试推送按钮 -->
 <div style="margin-bottom: 16px;">
-  <button id="radar-test-push-btn" onclick="FutureRadar.testPush()" style="width:100%; padding: 10px; background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
-    📨 发送测试消息（验证是否通畅）
-  </button>
-  <p style="margin-top: 6px; font-size: 12px; color: #6b7280; text-align: center;">点击后若手机收到消息，说明配置正确</p>
+<button id="radar-test-push-btn" onclick="FutureRadar.testPush()" style="padding: 8px 16px; background: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; width: 100%;">
+           📨 发送测试消息
+          </button>
 </div>
 <div style="background: #f3f4f6; padding: 12px; border-radius: 8px; font-size: 13px; color: #4b5563;">
 <div style="font-weight: 600; margin-bottom: 8px;">
            💡 功能说明
           </div>
 <ul style="margin: 0; padding-left: 20px;">
-<li>
-            每天首次打开页面时自动检查「提前N天」事件并推送
-           </li>
-<li>
-            页面保持打开时，每分钟自动检查「当天精细提醒」
-           </li>
-<li>
-            ⭐ 重要事件在剩余 3 天内强制提醒（不受提前天数限制）
-           </li>
-           <li style="color: #dc2626; font-weight: 600;">
-            ⚠️ 当天精细提醒需要页面保持打开状态才能触发
-           </li>
+<li>每天首次打开系统时自动推送待办摘要</li>
+<li>将符合提醒条件的事件推送到您的设备</li>
+<li>重要事件会在剩余3天内强制提醒</li>
+<li>当天精细提醒（提前X分钟）每分钟自动检查</li>
+<li>⚠️ 页面关闭后提醒暂停，部署 Worker 可实现后台推送</li>
 </ul>
 </div>
 </div>
-<!-- ☁️ 后台推送 Worker 标签页 -->
+<!-- 后台Worker标签页 -->
 <div class="settings-content" id="settings-content-worker" style="display:none">
 
   <!-- 状态区 -->
@@ -9088,26 +9079,24 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
     }
 
     switchSettingsTab(tabName) {
-        const tabs = ['push', 'worker', 'import', 'fileimport'];
+        // 切换标签页
+        const tabs = ['push', 'import', 'fileimport', 'worker'];
         tabs.forEach(tab => {
-            const tabBtn = document.getElementById('settings-tab-' + tab);
-            const tabContent = document.getElementById('settings-content-' + tab);
-            if (!tabBtn || !tabContent) return;
+            const tabBtn = document.getElementById(`settings-tab-${tab}`);
+            const content = document.getElementById(`settings-content-${tab}`);
             if (tab === tabName) {
-                tabBtn.classList.add('active');
-                tabContent.style.display = 'block';
+                if (tabBtn) tabBtn.classList.add('active');
+                if (content) content.style.display = 'block';
             } else {
-                tabBtn.classList.remove('active');
-                tabContent.style.display = 'none';
+                if (tabBtn) tabBtn.classList.remove('active');
+                if (content) content.style.display = 'none';
             }
         });
-        // 切换到 Worker 标签时回填 URL
+        // Worker标签页打开时回填已保存的URL
         if (tabName === 'worker') {
-            const urlInput = document.getElementById('radar-worker-url');
-            if (urlInput) {
-                const saved = __tpi_ls_get('tpi_radar_worker_url') || '';
-                urlInput.value = saved;
-                if (saved) this._workerStatusBanner('已配置 Worker：' + saved, 'info');
+            const urlEl = document.getElementById('radar-worker-url');
+            if (urlEl && !urlEl.value) {
+                urlEl.value = (__tpi_ls_get && __tpi_ls_get('tpi_radar_worker_url')) || '';
             }
         }
     }
@@ -9390,18 +9379,28 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
     onFormatImportTypeChange() { /* 已废弃，保留避免报错 */ }
 
     saveSettings() {
+        // 保存PushPlus配置
         const token = document.getElementById('radar-push-token').value.trim();
-        const tokenChanged = token !== this.pushConfig.token;
+        const oldToken = this.pushConfig.token;
         this.pushConfig.token = token;
-        // ✅ 修复：token 变更时重置每日检查记录，确保新 token 立即生效
-        if (tokenChanged) {
+
+        // Token变更时重置lastCheck，保存后立即触发一次检查
+        if (token !== oldToken) {
             this.pushConfig.lastCheck = '';
         }
         __tpi_ls_set(this.pushKey, JSON.stringify(this.pushConfig));
+
+        // 保存Worker URL
+        const workerUrlEl = document.getElementById('radar-worker-url');
+        if (workerUrlEl) {
+            __tpi_ls_set('tpi_radar_worker_url', workerUrlEl.value.trim());
+        }
+
         this.showSimpleNotification('✅ 配置已保存', 'success');
         this.closeSettingsModal();
-        // ✅ 修复：保存后立即触发一次推送检查
-        if (tokenChanged && token) {
+
+        // Token变更时延迟触发一次每日检查
+        if (token && token !== oldToken) {
             setTimeout(() => this.checkPushOnLoad(), 500);
         }
     }
@@ -9567,39 +9566,36 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
 
     // Worker连接测试
     async testWorkerConnection() {
-        const url = document.getElementById('radar-worker-url')?.value?.trim() || this._getWorkerUrl();
-        if (!url) { this._workerStatusBanner('⚠️ 请先填写 Worker URL', 'error'); return; }
-        this._workerStatusBanner('🔄 正在连接 Worker...', 'loading');
+        const urlEl = document.getElementById('radar-worker-url');
+        const statusEl = document.getElementById('radar-worker-status');
+        if (!urlEl || !statusEl) return;
+        const url = urlEl.value.trim();
+        if (!url) { statusEl.innerHTML = '<span style="color:#ef4444">请先输入 Worker URL</span>'; return; }
+        statusEl.innerHTML = '<span style="color:#6b7280">连接中...</span>';
         try {
-            const resp = await fetch(url + '/status', { signal: AbortSignal.timeout(10000) });
-            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-            const data = await resp.json();
-            this._workerStatusBanner(
-                `✅ Worker 连接正常！北京时间：${data.time_beijing}  |  今天：${data.today_beijing}  |  GitHub Token：${data.github_token_set ? '已配置✓' : '未配置✗'}  |  PushPlus Token：${data.pushplus_token_set ? '已配置✓' : '未配置✗'}`,
-                'success'
-            );
-        } catch (e) {
-            this._workerStatusBanner('❌ 连接失败：' + e.message + '（请检查 Worker URL 是否正确，或 Worker 是否已部署）', 'error');
+            const resp = await fetch(url + '/status');
+            if (resp.ok) {
+                const data = await resp.json();
+                statusEl.innerHTML = `<span style="color:#10b981">✅ 连接成功 | 北京时间：${data.time_beijing} | Token已配置：${data.pushplus_token_set ? '是' : '否（请在CF后台设置）'}</span>`;
+            } else {
+                statusEl.innerHTML = `<span style="color:#ef4444">❌ 连接失败：HTTP ${resp.status}</span>`;
+            }
+        } catch(e) {
+            statusEl.innerHTML = `<span style="color:#ef4444">❌ 无法连接：${e.message}</span>`;
         }
     }
 
     // 手动触发Worker推送
     async triggerWorkerNow(type) {
-        const url = document.getElementById('radar-worker-url')?.value?.trim() || this._getWorkerUrl();
-        if (!url) { this._workerStatusBanner('⚠️ 请先填写并保存 Worker URL', 'error'); return; }
-        const labelMap = { daily: '每日摘要推送', sameday: '当天精细提醒检查', test: '推送通道测试' };
-        this._workerStatusBanner(`🔄 正在触发 ${labelMap[type] || type}...`, 'loading');
+        const url = ((__tpi_ls_get && __tpi_ls_get('tpi_radar_worker_url')) || '').replace(/\/$/, '');
+        if (!url) { alert('请先输入并保存 Worker URL'); return; }
+        const endpoint = type === 'daily' ? '/trigger/daily' : '/trigger/sameday';
         try {
-            const resp = await fetch(`${url}/trigger/${type}`, { signal: AbortSignal.timeout(30000) });
+            const resp = await fetch(url + endpoint);
             const text = await resp.text();
-            if (resp.ok) {
-                this._workerStatusBanner(`✅ ${text}`, 'success');
-                this.showSimpleNotification('✅ ' + text, 'success');
-            } else {
-                this._workerStatusBanner('❌ Worker 返回错误：' + text, 'error');
-            }
-        } catch (e) {
-            this._workerStatusBanner('❌ 请求失败：' + e.message, 'error');
+            this.showSimpleNotification(text, resp.ok ? 'success' : 'warning');
+        } catch(e) {
+            this.showSimpleNotification('❌ 触发失败：' + e.message, 'error');
         }
     }
 
@@ -9610,34 +9606,6 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
         __tpi_ls_set('tpi_radar_worker_url', urlEl.value.trim());
         this.showSimpleNotification('✅ Worker URL 已保存', 'success');
     }
-
-
-    saveWorkerConfig() {
-        const url = (document.getElementById('radar-worker-url')?.value || '').trim();
-        if (!url) { this._workerStatusBanner('⚠️ 请先填写 Worker URL', 'error'); return; }
-        if (!url.startsWith('https://')) { this._workerStatusBanner('⚠️ URL 必须以 https:// 开头', 'error'); return; }
-        __tpi_ls_set('tpi_radar_worker_url', url);
-        this._workerStatusBanner('✅ Worker URL 已保存：' + url, 'success');
-        this.showSimpleNotification('✅ Worker 配置已保存', 'success');
-    }
-
-    _getWorkerUrl() {
-        return __tpi_ls_get('tpi_radar_worker_url') || '';
-    }
-
-    _workerStatusBanner(msg, type = 'info') {
-        const el = document.getElementById('worker-status-banner');
-        if (!el) return;
-        const styles = {
-            info:    'background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af;',
-            success: 'background:#f0fdf4; border:1px solid #bbf7d0; color:#166534;',
-            error:   'background:#fef2f2; border:1px solid #fecaca; color:#991b1b;',
-            loading: 'background:#fffbeb; border:1px solid #fde68a; color:#92400e;',
-        };
-        el.style.cssText = `display:block; padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:13px; font-weight:600; ${styles[type] || styles.info}`;
-        el.textContent = msg;
-    }
-
 
     // 简单通知显示函数(备用)
     showSimpleNotification(message, type = 'info') {
