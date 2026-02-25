@@ -4382,11 +4382,12 @@ if (typeof window.showModal === 'undefined') {
         }
         
         content.innerHTML = `
-            <div class="modal-header" style="padding: 20px; border-bottom: 1px solid #e5e7eb;">
+            <div class="modal-header" style="padding: 20px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between;">
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="font-size: 24px;">${icon}</div>
                     <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">${title}</h3>
                 </div>
+                <button class="modal-close-x-btn" type="button" title="关闭" style="background: none; border: none; cursor: pointer; font-size: 20px; color: #9ca3af; padding: 4px 8px; border-radius: 6px; line-height: 1; transition: all 0.15s; flex-shrink: 0;">✕</button>
             </div>
             <div class="modal-body" style="padding: 20px;">
                 ${message}
@@ -4447,6 +4448,16 @@ if (typeof window.showModal === 'undefined') {
             cancelBtn.addEventListener('mouseout', () => {
                 cancelBtn.style.background = 'white';
             });
+        }
+        
+                const closeXBtn = content.querySelector('.modal-close-x-btn');
+        if (closeXBtn) {
+            closeXBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
+                if (onCancel) onCancel();
+                closeModal();
+            });
+            closeXBtn.addEventListener('mouseover', () => { closeXBtn.style.background = '#f3f4f6'; closeXBtn.style.color = '#374151'; });
+            closeXBtn.addEventListener('mouseout', () => { closeXBtn.style.background = 'none'; closeXBtn.style.color = '#9ca3af'; });
         }
         
         // 点击遮罩关闭（如果有取消按钮）
@@ -22750,16 +22761,11 @@ function checkStorageUsage() {
       storageInfo.style.color = percentage > 90 ? '#dc2626' : percentage > 75 ? '#f59e0b' : '#10b981';
     }
 
-    if (percentage > 95) {
-      showStorageCriticalModal(sizeInMB, maxSize, percentage);
-      return false;
-    } else if (percentage > 90) {
-      showStorageWarningModal(sizeInMB, maxSize, percentage);
-    } else if (percentage > 75) {
-      showToast('存储空间使用已超过75%，建议定期导出备份数据', 'warning');
-    }
+    // [方案C] 保留存储占用显示，但不再弹出任何“存储不足”弹窗/Toast，也不阻断保存流程。
+    // 原先：>75% toast、>90% warning modal、>95% critical modal + return false
+    // 现在：仅更新 storage-usage-info，不做 UI 打断。
 
-    return true;
+return true;
   } catch (e) {
     console.error('存储检查失败:', e);
     return true;
@@ -22772,7 +22778,8 @@ function showStorageCriticalModal(currentSize, maxSize, percentage) {
     title: '🚨 存储空间严重不足',
     message: '<div style="text-align: left;"><div style="background: #fee2e2; border-left: 4px solid #dc2626; padding: 15px; margin: 15px 0; border-radius: 4px;"><p style="margin: 0; font-weight: bold; color: #991b1b;">⚠️ 存储空间已使用 ' + percentage.toFixed(1) + '%</p><p style="margin: 10px 0 0 0; color: #7f1d1d;">当前: ' + currentSize + ' MB / ' + maxSize + ' MB<br><strong>您必须立即清理数据，否则无法保存新数据！</strong></p></div><h4>请选择一个操作：</h4><div style="display: flex; flex-direction: column; gap: 10px; margin-top: 15px;"><button onclick="autoCleanOldData(30); closeAllModals();" class="modal-button modal-button-primary tpi-inline-02">🗑️ 自动清理30天前的数据（推荐）</button><button onclick="autoCleanOldData(60); closeAllModals();" class="modal-button" style="width: 100%; background: #3b82f6; color: white;">🗑️ 自动清理60天前的数据</button><button onclick="exportAndResetAll(); closeAllModals();" class="modal-button" style="width: 100%; background: #dc2626; color: white;">💾 导出全部数据后重置系统</button></div></div>',
     showCancel: false,
-    showConfirm: false
+    showConfirm: true,
+    confirmText: '我知道了'
   });
 }
 
@@ -32053,7 +32060,7 @@ function loadMainInterface() {
     try{
       if (typeof window.setLoggedInUI === 'function') {
         // 如果你页面已有“tpi-username”输入框，则用它做显示名
-        const email = (document.getElementById('tpi-username') &amp;&amp; document.getElementById('tpi-username').value) ? document.getElementById('tpi-username').value : '';
+        const email = (document.getElementById('tpi-username') && document.getElementById('tpi-username').value) ? document.getElementById('tpi-username').value : '';
         window.setLoggedInUI(email);
       } else {
         // 兜底：如果你页面是 tpi-auth-panel / tpi-sync-panel
@@ -32116,7 +32123,7 @@ window.addEventListener('beforeunload', async (e) => {
         const today = getTodayString();
         if (typeof window.collectDailyData === 'function') {
             const obj = window.collectDailyData();
-            const snapshot = obj &amp;&amp; obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+            const snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
             if (snapshot) {
                 __tpi_ls_set('tpi_unsaved_data_' + today, JSON.stringify(snapshot));
                 __tpi_ls_set('tpi_unsaved_timestamp', new Date().toISOString());
@@ -32134,7 +32141,7 @@ window.checkUnsavedData = async function() {
     const unsavedData = __tpi_ls_get('tpi_unsaved_data_' + today);
     const timestamp = __tpi_ls_get('tpi_unsaved_timestamp');
     
-    if (unsavedData &amp;&amp; timestamp) {
+    if (unsavedData && timestamp) {
         const unsavedTime = new Date(timestamp);
         const now = new Date();
         const minutesDiff = (now - unsavedTime) / 1000 / 60;
@@ -32217,10 +32224,10 @@ async function loadTodaysData() {
               if (typeof cloudData === 'string') {
                 const parsed = JSON.parse(cloudData);
                 // ✅ 支持压缩包装格式（tpi_cloud_v3）
-                if (parsed &amp;&amp; typeof parsed === 'object' &amp;&amp; (parsed.schema === 'tpi_cloud_v3' || parsed.schema === 'tpi_cloud_v2')) {
+                if (parsed && typeof parsed === 'object' && (parsed.schema === 'tpi_cloud_v3' || parsed.schema === 'tpi_cloud_v2')) {
                   const payload = parsed.payload;
                   let jsonStr = null;
-                  if (parsed.compressed &amp;&amp; window.TPIDataCompression &amp;&amp; typeof window.TPIDataCompression.decompressString === 'function') {
+                  if (parsed.compressed && window.TPIDataCompression && typeof window.TPIDataCompression.decompressString === 'function') {
                     jsonStr = window.TPIDataCompression.decompressString(payload);
                   } else {
                     jsonStr = (typeof payload === 'string') ? payload : JSON.stringify(payload || {});
@@ -32244,7 +32251,7 @@ async function loadTodaysData() {
                     }
                     const raw = JSON.stringify(snapshot || {});
                     const got = __tpi_fnv1a32(raw);
-                    if (parsed.checksum &amp;&amp; got !== String(parsed.checksum)) {
+                    if (parsed.checksum && got !== String(parsed.checksum)) {
                       console.warn('⚠️ [云端同步] 校验和不一致：可能数据被截断/损坏', {expected: parsed.checksum, got});
                     }
                   }catch(e){}
@@ -32273,14 +32280,14 @@ async function loadTodaysData() {
               }
             }
 
-            if (snapshot &amp;&amp; typeof window.restoreUIFromData === 'function') {
+            if (snapshot && typeof window.restoreUIFromData === 'function') {
                 console.log('🔄 [云端同步] 开始恢复UI数据...');
                 window.restoreUIFromData(snapshot);
                 console.log('✅ [云端同步] 数据已成功加载并恢复到页面');
                 
                 // 🔥 保障3：触发分数重新计算确保显示正确
                 try {
-                  if (typeof window.TPI !== 'undefined' &amp;&amp; typeof window.TPI.calculateSystem === 'function') {
+                  if (typeof window.TPI !== 'undefined' && typeof window.TPI.calculateSystem === 'function') {
                     window.TPI.calculateSystem();
                     console.log('✅ [云端同步] 分数已重新计算');
                   }
@@ -32303,7 +32310,7 @@ async function loadTodaysData() {
             if (backup) {
               try {
                 const snapshot = JSON.parse(backup);
-                if (snapshot &amp;&amp; typeof window.restoreUIFromData === 'function') {
+                if (snapshot && typeof window.restoreUIFromData === 'function') {
                   window.restoreUIFromData(snapshot);
                   console.log('✅ [云端同步] 使用本地备份数据恢复');
                   alert('✅ 已从本地备份恢复数据');
@@ -32336,7 +32343,7 @@ async function saveTodaysData() {
     try{
       if (typeof window.collectDailyData === 'function') {
         const obj = window.collectDailyData();
-        snapshot = obj &amp;&amp; obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
+        snapshot = obj && obj[today] ? obj[today] : (obj ? obj[Object.keys(obj)[0]] : null);
         console.log('📦 [云端同步] 收集到的快照数据:', snapshot);
       } else {
         console.error('❌ [云端同步] collectDailyData 函数不存在');
@@ -32369,9 +32376,9 @@ async function saveTodaysData() {
       const prevRaw = __tpi_ls_get('tpi_last_snapshot_' + today);
       if (prevRaw) {
         const prevObj = JSON.parse(prevRaw);
-        if (window.TPIIncrementalSync &amp;&amp; typeof window.TPIIncrementalSync.calculateDiff === 'function') {
+        if (window.TPIIncrementalSync && typeof window.TPIIncrementalSync.calculateDiff === 'function') {
           const diffObj = window.TPIIncrementalSync.calculateDiff(prevObj, snapshot);
-          if (diffObj &amp;&amp; typeof diffObj === 'object') changedKeys = Object.keys(diffObj);
+          if (diffObj && typeof diffObj === 'object') changedKeys = Object.keys(diffObj);
         } else {
           // 兜底：浅比较
           Object.keys(snapshot||{}).forEach(k=>{ try{ if (JSON.stringify(prevObj?.[k]) !== JSON.stringify(snapshot[k])) changedKeys.push(k); }catch(_){ changedKeys.push(k); } });
@@ -32386,7 +32393,7 @@ async function saveTodaysData() {
 
     let compressed = null;
     try{
-      if (window.TPIDataCompression &amp;&amp; typeof window.TPIDataCompression.compressString === 'function'){
+      if (window.TPIDataCompression && typeof window.TPIDataCompression.compressString === 'function'){
         compressed = window.TPIDataCompression.compressString(rawJson);
       }
     }catch(e){ compressed = null; }
@@ -32395,7 +32402,7 @@ async function saveTodaysData() {
       schema: 'tpi_cloud_v3',
       date: today,
       updatedAt: new Date().toISOString(),
-      deviceId: (window.TPIConflictResolver &amp;&amp; typeof window.TPIConflictResolver.getDeviceId === 'function') ? window.TPIConflictResolver.getDeviceId() : (__tpi_ls_get('tpi_device_id') || ''),
+      deviceId: (window.TPIConflictResolver && typeof window.TPIConflictResolver.getDeviceId === 'function') ? window.TPIConflictResolver.getDeviceId() : (__tpi_ls_get('tpi_device_id') || ''),
       changedKeys: changedKeys.slice(0, 300),
       checksum: checksum,
       compressed: !!compressed,
@@ -32452,7 +32459,7 @@ async function saveTodaysData() {
             Appwrite.Query.limit(1)
         ]);
         
-        if (verifyDocs.documents.length > 0 &amp;&amp; verifyDocs.documents[0].data) {
+        if (verifyDocs.documents.length > 0 && verifyDocs.documents[0].data) {
           const savedDataStr = verifyDocs.documents[0].data;
           console.log('✅ [云端同步] 回读验证成功，数据长度:', savedDataStr.length);
           
@@ -32558,7 +32565,7 @@ async function saveTodaysData() {
     // ✅ 数据压缩：优先使用 lz-string（体积更小），否则降级到 btoa/base64
     compressString: function(str){
       try{
-        if (window.LZString &amp;&amp; typeof window.LZString.compressToUTF16 === 'function') {
+        if (window.LZString && typeof window.LZString.compressToUTF16 === 'function') {
           return { algo:'lzutf16', payload: window.LZString.compressToUTF16(String(str||'')) };
         }
       }catch(e){}
@@ -32570,10 +32577,10 @@ async function saveTodaysData() {
     },
     decompressString: function(objOrStr){
       try{
-        if (objOrStr &amp;&amp; typeof objOrStr === 'object' &amp;&amp; objOrStr.algo &amp;&amp; objOrStr.payload != null){
+        if (objOrStr && typeof objOrStr === 'object' && objOrStr.algo && objOrStr.payload != null){
           const algo = objOrStr.algo;
           const payload = objOrStr.payload;
-          if (algo === 'lzutf16' &amp;&amp; window.LZString &amp;&amp; typeof window.LZString.decompressFromUTF16 === 'function'){
+          if (algo === 'lzutf16' && window.LZString && typeof window.LZString.decompressFromUTF16 === 'function'){
             return window.LZString.decompressFromUTF16(String(payload||'')) || '';
           }
           if (algo === 'b64uri'){
@@ -32847,9 +32854,9 @@ async function saveTodaysData() {
     
     addToQueue: function(operation) {
       const now = Date.now();
-      const op = (operation &amp;&amp; typeof operation === 'object') ? operation : { type: 'unknown' };
+      const op = (operation && typeof operation === 'object') ? operation : { type: 'unknown' };
       const priority = (typeof op.priority === 'number') ? op.priority : 0;
-      const ttlDays = (typeof op.ttlDays === 'number' &amp;&amp; op.ttlDays > 0) ? op.ttlDays : 7;
+      const ttlDays = (typeof op.ttlDays === 'number' && op.ttlDays > 0) ? op.ttlDays : 7;
       const expiresAt = op.expiresAt || (now + ttlDays * 24 * 60 * 60 * 1000);
       this.syncQueue.push({
         ...op,
@@ -32925,7 +32932,7 @@ async function saveTodaysData() {
           try{
             if (window.tpiToast) window.tpiToast(`📤 离线队列同步中：${idx}/${total}（剩余 ${total-idx}）`, 'info');
           }catch(e){}
-          if (item &amp;&amp; item.type === 'save_date' &amp;&amp; item.date &amp;&amp; typeof window.saveDateData === 'function') {
+          if (item && item.type === 'save_date' && item.date && typeof window.saveDateData === 'function') {
             await window.saveDateData(item.date);
           } else if (typeof window.saveTodaysData === 'function') {
             await window.saveTodaysData();
@@ -32962,7 +32969,7 @@ async function saveTodaysData() {
       if (localTime === cloudTime) return null;
       
       // 如果设备不同且时间接近(5分钟内)，可能存在冲突
-      if (localDevice !== cloudDevice &amp;&amp; Math.abs(localTime - cloudTime) < 5 * 60 * 1000) {
+      if (localDevice !== cloudDevice && Math.abs(localTime - cloudTime) < 5 * 60 * 1000) {
         return {
           type: 'concurrent_edit',
           localTime: new Date(localTime),
@@ -33314,7 +33321,7 @@ async function saveTodaysData() {
     remove: function(toast) {
       toast.style.transform = 'translateX(calc(100% + 40px))';
       setTimeout(function() { 
-        if (toast &amp;&amp; toast.parentNode) {
+        if (toast && toast.parentNode) {
           toast.parentNode.removeChild(toast);
         }
       }, 300);
@@ -33412,7 +33419,7 @@ window.TPILoader = {
       var backdrop = loader.querySelector('div');
       if (backdrop) backdrop.style.opacity = '0';
       setTimeout(function() { 
-        if (loader &amp;&amp; loader.parentNode) {
+        if (loader && loader.parentNode) {
           loader.parentNode.removeChild(loader);
         }
       }, 200);
@@ -33448,7 +33455,7 @@ document.addEventListener('DOMContentLoaded', function() {
           var result = await originalSave.apply(this, arguments);
           TPILoader.hide();
           
-          if (result &amp;&amp; result.success !== false) {
+          if (result && result.success !== false) {
             TPIToast.success('✅ 数据已成功上传到云端');
           }
           
@@ -33473,7 +33480,7 @@ document.addEventListener('DOMContentLoaded', function() {
           var result = await originalLoad.apply(this, arguments);
           TPILoader.hide();
           
-          if (result &amp;&amp; result.success !== false) {
+          if (result && result.success !== false) {
             TPIToast.success('✅ 数据已成功从云端加载');
           }
           
@@ -33535,7 +33542,7 @@ window.__tpiDirectExport = function(fmt) {
 
   /* ── 1. 当前日期 ── */
   var dateEl = document.getElementById('date-input') || document.querySelector('input[type="date"]');
-  var date = (dateEl &amp;&amp; dateEl.value) ? dateEl.value : (function(){
+  var date = (dateEl && dateEl.value) ? dateEl.value : (function(){
     var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   })();
@@ -33552,7 +33559,7 @@ window.__tpiDirectExport = function(fmt) {
 
     if (/token|secret|password|pat/i.test(id) || type === 'password' || type === 'hidden') return;
     if (id === 'date-input') return;
-    if (el.closest &amp;&amp; el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
+    if (el.closest && el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
 
     if (type === 'checkbox') {
       if (id === 'misc-log-select-all') return;
@@ -33595,7 +33602,7 @@ window.__tpiDirectExport = function(fmt) {
     var el = document.getElementById(p[0]);
     if (!el) return;
     var v = (el.tagName === 'INPUT' || el.tagName === 'SELECT') ? el.value : el.textContent.trim();
-    if (v &amp;&amp; v !== '' &amp;&amp; v !== '0' &amp;&amp; v !== '0.0') scoreMap[p[1]] = v;
+    if (v && v !== '' && v !== '0' && v !== '0.0') scoreMap[p[1]] = v;
   });
 
   [
@@ -33612,7 +33619,7 @@ window.__tpiDirectExport = function(fmt) {
     var el = document.getElementById(p[0]);
     if (!el) return;
     var v = el.textContent.trim().replace(/\s+/g,' ');
-    if (v &amp;&amp; v !== '' &amp;&amp; v !== '-' &amp;&amp; v !== '0' &amp;&amp; v !== '0.0') scoreMap[p[1]] = v;
+    if (v && v !== '' && v !== '-' && v !== '0' && v !== '0.0') scoreMap[p[1]] = v;
   });
 
   /* 顶栏看板 ts-* 前缀（Appwrite版专有） */
@@ -33624,19 +33631,19 @@ window.__tpiDirectExport = function(fmt) {
     var el = document.getElementById(p[0]);
     if (!el) return;
     var v = el.textContent.trim().replace(/\s+/g,' ');
-    if (v &amp;&amp; v !== '' &amp;&amp; v !== '-' &amp;&amp; v !== '0' &amp;&amp; v !== '0.0') scoreMap[p[1]] = v;
+    if (v && v !== '' && v !== '-' && v !== '0' && v !== '0.0') scoreMap[p[1]] = v;
   });
 
   /* ── 4. 杂记 ── */
   var miscRecords = [];
   try {
-    if (window.appData &amp;&amp; window.appData.misc &amp;&amp; window.appData.misc[date]) {
+    if (window.appData && window.appData.misc && window.appData.misc[date]) {
       miscRecords = window.appData.misc[date];
     } else {
       var miscRaw = null;
       var miscTA = document.getElementById('misc-records-json');
-      if (miscTA &amp;&amp; miscTA.value) miscRaw = miscTA.value;
-      if (!miscRaw &amp;&amp; typeof window.__tpi_ls_get === 'function') miscRaw = window.__tpi_ls_get('tpi_misc_records_' + date);
+      if (miscTA && miscTA.value) miscRaw = miscTA.value;
+      if (!miscRaw && typeof window.__tpi_ls_get === 'function') miscRaw = window.__tpi_ls_get('tpi_misc_records_' + date);
       if (miscRaw) { var parsed = JSON.parse(miscRaw); if (Array.isArray(parsed)) miscRecords = parsed; }
     }
     if (miscRecords.length === 0) {
@@ -33644,7 +33651,7 @@ window.__tpiDirectExport = function(fmt) {
       if (logList) {
         logList.querySelectorAll('.misc-log-body, .misc-log-content').forEach(function(el) {
           var t = el.textContent.trim();
-          if (t &amp;&amp; t.length > 2) miscRecords.push({ text: t, _fromDOM: true });
+          if (t && t.length > 2) miscRecords.push({ text: t, _fromDOM: true });
         });
       }
     }
@@ -33653,7 +33660,7 @@ window.__tpiDirectExport = function(fmt) {
   /* ── 5. Future Radar ── */
   var radarEvents = { tempLife: [], tempAcademic: [], regularLife: [], regularAcademic: [] };
   try {
-    if (window.appData &amp;&amp; window.appData.radar) {
+    if (window.appData && window.appData.radar) {
       radarEvents = window.appData.radar;
     } else {
       ['tempLife','tempAcademic','regularLife','regularAcademic'].forEach(function(key) {
@@ -33675,7 +33682,7 @@ window.__tpiDirectExport = function(fmt) {
   /* ── 6. contenteditable 富文本 ── */
   var richTexts = [];
   document.querySelectorAll('[contenteditable="true"]').forEach(function(el) {
-    if (el.closest &amp;&amp; el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
+    if (el.closest && el.closest('#radar-form, #radar-modal, #radar-settings-modal')) return;
     var id = el.id || '';
     var label = el.getAttribute('aria-label') || id || el.getAttribute('placeholder') || '富文本';
     var content = (el.innerText || el.textContent || '').trim();
@@ -33706,7 +33713,7 @@ window.__tpiDirectExport = function(fmt) {
       times: times, texts: texts, miscRecords: miscRecords, radarEvents: radarEvents
     };
     download(JSON.stringify(payload, null, 2), 'TPI_'+date+'_'+ts()+'.json', 'application/json;charset=utf-8');
-    var filledTA = textareas.filter(function(t){ return t.value &amp;&amp; t.value.trim(); });
+    var filledTA = textareas.filter(function(t){ return t.value && t.value.trim(); });
     var radarTotal = Object.values(radarEvents).reduce(function(a,b){ return a+(b?b.length:0); },0);
     alert('✅ JSON 导出成功！\n文本框：'+filledTA.length+' 个有内容\n分数项：'+Object.keys(scoreMap).length+' 项\n杂记：'+miscRecords.length+' 条\n雷达事件：'+radarTotal+' 条');
   } else {
@@ -33837,6 +33844,43 @@ try {
 
 </script>
 
+
+
+<script>
+/* =========================================================
+   方案C：关闭“存储空间不足”相关弹窗/Toast（保留占用显示）
+   - 不影响存储指示器(storage-usage-info)更新
+   - 不阻断保存/同步流程
+========================================================= */
+(function(){
+  try{ window.__tpi_disable_storage_popups = true; }catch(e){}
+  function noop(){}
+
+  // 覆盖所有可能存在的存储弹窗入口（不同版本里函数名略有不同）
+  try{ window.showStorageCriticalModal = noop; }catch(e){}
+  try{ window.showStorageWarningModal  = noop; }catch(e){}
+  try{ window.showStorageFullModal     = noop; }catch(e){}
+
+  // 如果有旧版本函数名，也一并兜底
+  try{ window.showStorageFullWarningModal = noop; }catch(e){}
+  try{ window.showStorageNearFullModal    = noop; }catch(e){}
+
+  // 兜底：若某处仍调用 showToast('存储空间...')，这里不全局禁用 showToast，
+  // 仅屏蔽“存储空间”相关的提示（避免影响其它提示）。
+  try{
+    if (typeof window.showToast === 'function' && !window.__tpi_showToast_wrapped_for_storage){
+      const _origToast = window.showToast;
+      window.showToast = function(msg, type){
+        try{
+          if (typeof msg === 'string' && msg.indexOf('存储空间') !== -1) return;
+        }catch(e){}
+        return _origToast.apply(this, arguments);
+      };
+      window.__tpi_showToast_wrapped_for_storage = true;
+    }
+  }catch(e){}
+})();
+</script>
 
 </body>
 </html>
