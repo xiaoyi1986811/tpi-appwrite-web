@@ -7417,7 +7417,12 @@ window.exportAsCSV = function() {
     <input id="radar-worker-url" type="text"
       placeholder="https://tpi-reminder-worker.你的账号.workers.dev"
       style="width:100%; padding:8px; border:1px solid #d1d5db; border-radius:6px; font-size:13px;"/>
-    <p style="margin-top:6px; font-size:12px; color:#6b7280;">
+    
+    <div style="margin-top:10px; display:flex; align-items:center; gap:8px; font-size:13px;">
+      <input id="radar-worker-force" type="checkbox" style="transform:scale(1.05);" />
+      <label for="radar-worker-force" style="cursor:pointer;">强制重发（跳过去重，仅用于手动触发）</label>
+    </div>
+<p style="margin-top:6px; font-size:12px; color:#6b7280;">
       部署 Worker 后将其 URL 填入此处，即可实现关闭网页也能收到推送
     </p>
   </div>
@@ -9589,7 +9594,9 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
             this.__workerToast('❌ ' + msg, 'error', url, null, null);
             return;
         }
-        if (statusEl) statusEl.innerHTML = '<span style="color:#6b7280">连接中...</span>';
+        
+        const __tpi_force = !!document.getElementById('radar-worker-force')?.checked;
+if (statusEl) statusEl.innerHTML = '<span style="color:#6b7280">连接中...</span>';
         // 尝试多个端点：/health（已知可用）、/status（备用）
         const endpoints = ['/health', '/status'];
         let lastErr = null;
@@ -9646,6 +9653,12 @@ const current = (this.sortMode && this.sortMode[key]) ? this.sortMode[key] : 'pr
         if (type === 'daily') { primaryEndpoint = '/trigger/daily'; fallbackEndpoint = null; }
         else if (type === 'test') { primaryEndpoint = '/trigger/test-push'; fallbackEndpoint = '/trigger/test'; }
         else { primaryEndpoint = '/trigger/sameday'; fallbackEndpoint = null; }
+
+
+        if (__tpi_force && (type === 'daily' || type === 'sameday')) {
+            primaryEndpoint = primaryEndpoint + (primaryEndpoint.includes('?') ? '&' : '?') + 'force=1';
+            if (fallbackEndpoint) fallbackEndpoint = fallbackEndpoint + (fallbackEndpoint.includes('?') ? '&' : '?') + 'force=1';
+        }
 
         const tryFetch = async (endpoint) => {
             const fullUrl = url + endpoint;
