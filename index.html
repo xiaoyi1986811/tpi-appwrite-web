@@ -5,6 +5,10 @@
 <meta charset="utf-8"/>
 
 <script>
+// --- FIX: ensure __tpi_force exists so Worker trigger buttons work ---
+window.__tpi_force = (typeof window.__tpi_force === 'boolean') ? window.__tpi_force : false;
+// --- END FIX ---
+
 // === IndexedDB 配额初始化（替代 localStorage 5MB 基准）===
 (function() {
   window.__idbQuota = 0;       // 字节
