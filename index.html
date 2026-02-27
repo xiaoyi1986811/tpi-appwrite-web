@@ -32275,12 +32275,16 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
       
       console.log('✅ [下载] 所有UI刷新和重新计算完成');
       
-      // 步骤6：最终兜底 - 如果完全没有恢复成功，才刷新页面
+      // 步骤6：最终兜底 - 不自动刷新（避免无痕/隐私策略导致登录态丢失与页面跳回登录）
       if (!__uiRestored && !dayData) {
-        console.log('⚠️ [下载] 未能通过函数恢复UI，将刷新页面...');
-        try { 
-          setTimeout(() => location.reload(), 500); 
-        } catch(_){}
+        console.warn('⚠️ [下载] 未检测到可用的 UI 恢复函数，已完成数据写入，但不会自动刷新页面。');
+        try{
+          if (typeof showModal === 'function') {
+            showModal({type:'info', title:'下载完成', message:'✅ 数据已下载并写入本地存储。\n\n⚠️ 但页面未检测到可用的 UI 恢复函数来立即渲染这些数据。\n\n你可以：\n1) 先点击“知道了”关闭提示；\n2) 如需立即看到完整渲染，请手动刷新页面（F5）。\n\n（我们不自动刷新，以避免无痕/隐私策略导致登录态丢失而跳回登录页）', confirmText:'知道了'});
+          }
+        }catch(_e){}
+        // 认为已经完成兜底处理，避免任何后续逻辑触发自动刷新
+        __uiRestored = true;
       }
 
 const __download_end_time = Date.now();
