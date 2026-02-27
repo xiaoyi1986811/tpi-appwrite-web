@@ -4358,8 +4358,7 @@ console.log('✅ window.checkDataHealthComplete:', typeof window.checkDataHealth
 // 12. showModal模态框函数
 if (typeof window.showModal === 'undefined') {
     window.showModal = function(options) {
-        try {
-        __tpi_log('📢 [showModal] 被调用, 选项:', options);
+        console.log('📢 [showModal] 被调用, 选项:', options);
         
         const {
             type = 'info',
@@ -4467,7 +4466,7 @@ if (typeof window.showModal === 'undefined') {
 
         if (confirmBtn) {
             confirmBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
-                __tpi_log('✅ [showModal] 用户点击确认');
+                console.log('✅ [showModal] 用户点击确认');
                 if (onConfirm) onConfirm();
                 closeModal();
             });
@@ -4487,7 +4486,7 @@ if (typeof window.showModal === 'undefined') {
         const cancelBtn = content.querySelector('.modal-cancel-btn');
         if (cancelBtn) {
             cancelBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
-                __tpi_log('❌ [showModal] 用户点击取消');
+                console.log('❌ [showModal] 用户点击取消');
                 if (onCancel) onCancel();
                 closeModal();
             });
@@ -4515,7 +4514,7 @@ if (typeof window.showModal === 'undefined') {
         if (showCancel) {
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) {
-                    __tpi_log('❌ [showModal] 用户点击遮罩关闭');
+                    console.log('❌ [showModal] 用户点击遮罩关闭');
                     if (onCancel) onCancel();
                     closeModal();
                 }
@@ -4525,26 +4524,16 @@ if (typeof window.showModal === 'undefined') {
         // 自动关闭
         if (autoClose > 0) {
             setTimeout(() => {
-                __tpi_log('⏱️ [showModal] 自动关闭');
+                console.log('⏱️ [showModal] 自动关闭');
                 closeModal();
             }, autoClose);
         }
         
-        __tpi_log('✅ [showModal] 模态框已创建');
+        console.log('✅ [showModal] 模态框已创建');
         
         return {
             close: closeModal
         };
-        } catch (err) {
-            try { console.error('❌ [showModal] 内部异常:', err); } catch(e){}
-            try {
-                // 最低限度兜底：使用原生 alert/confirm，避免卡死在遮罩层
-                const msg = (options && (options.message || options.title)) ? String(options.message || options.title) : '发生错误';
-                alert(msg.replace(/<[^>]*>/g, ''));
-            } catch(e){}
-            return { close: function(){} };
-        }
-
     };
 }
 
@@ -8046,8 +8035,7 @@ try {
         const normalize = (obj) => {
             if (!obj || typeof obj !== 'object') return;
             self.data = { ...self.data, ...obj };
-            const __catKeys = Array.isArray(self.categories) ? self.categories : Object.keys(self.categories || {});
-            __catKeys.forEach(k => {
+            self.categories.forEach(k => {
                 if (!Array.isArray(self.data[k])) self.data[k] = [];
             });
         };
@@ -8106,8 +8094,7 @@ try {
             if (v2Raw) {
                 const v2 = JSON.parse(v2Raw);
                 const migrated = {};
-                const __catKeys2 = Array.isArray(self.categories) ? self.categories : Object.keys(self.categories || {});
-                __catKeys2.forEach(key => {
+                self.categories.forEach(key => {
                     migrated[key] = Array.isArray(v2[key]) ? v2[key].map(item => ({
                         ...item,
                         id: item.id || ('evt_' + Date.now() + '_' + Math.random().toString(16).slice(2)),
@@ -10017,10 +10004,6 @@ window.FutureRadar = FutureRadar; // 暴露给插件使用
     const originalOpenModal = FutureRadar.openModal.bind(FutureRadar);
     
     FutureRadar.openModal = function(type) {
-        console.log('🎯 [FutureRadar.openModal] 被调用');
-        console.log('🎯 [FutureRadar.openModal] 类型:', type);
-        console.log('🎯 [FutureRadar.openModal] 执行时间:', new Date().toLocaleString());
-        
         const typeNames = {
             'tempLife': '⚡ 生活临时',
             'tempAcademic': '🎓 学术临时',
@@ -10029,7 +10012,6 @@ window.FutureRadar = FutureRadar; // 暴露给插件使用
         };
         
         const typeName = typeNames[type] || type;
-        console.log('🎯 [FutureRadar.openModal] 类型名称:', typeName);
         
         try {
             // 检查是否存在完整的模态框元素
@@ -10037,11 +10019,8 @@ window.FutureRadar = FutureRadar; // 暴露给插件使用
             
             if (modalElement && originalOpenModal) {
                 // 如果模态框元素存在且原始函数存在，调用原始函数
-                console.log('✅ [FutureRadar.openModal] 调用原始openModal（完整模态框）');
                 originalOpenModal(type);
             } else if (modalElement) {
-                // 如果只有模态框元素，直接显示
-                console.log('✅ [FutureRadar.openModal] 直接显示模态框');
                 modalElement.style.display = 'flex';
                 modalElement.setAttribute('data-type', type);
                 const titleElement = modalElement.querySelector('.modal-title');
@@ -19740,6 +19719,7 @@ if (!calculateTPI_original) {
                                 <h3 class="modal-title">${title}</h3>
                                 ${subtitle ? `<div class="modal-subtitle">${subtitle}</div>` : ''}
                             </div>
+                            <button class="modal-close-x-btn notify-close-x" type="button" title="关闭" style="background:none;border:none;cursor:pointer;font-size:20px;color:#9ca3af;padding:4px 8px;border-radius:6px;line-height:1;margin-left:auto;flex-shrink:0;">✕</button>
                         </div>
                         <div class="modal-body" style="display: flex; flex-direction: column; flex: 1; overflow: hidden; padding: 15px;">
                             <div class="modal-message">${message}</div>
@@ -19775,11 +19755,16 @@ if (!calculateTPI_original) {
                         button.addEventListener('click', function(e){ try{ e.preventDefault(); e.stopPropagation(); }catch(_){ } closeModal(); });
                     }
 
-                    // 阻止遮罩层点击关闭(必须点按钮)
+                    // 绑定X关闭按钮
+                    const closeXBtn = modal.querySelector('.notify-close-x');
+                    if (closeXBtn) {
+                        closeXBtn.addEventListener('click', function(e){ try{ e.preventDefault(); e.stopPropagation(); }catch(_){ } closeModal(); });
+                    }
+
+                    // 点击遮罩层关闭
                     overlay.addEventListener('click', (e) => {
                         if (e.target === overlay) {
-                            // 不做任何事,强制用户点击按钮
-                            return;
+                            closeModal();
                         }
                     });
                 },
@@ -28577,13 +28562,7 @@ window.TemplateSyncManager = {
     }
 };
 
-console.log('✅ ═══════════════════════════════════════════════════════');
-console.log('✅ 批次17修复完成 - 所有缺失功能已添加');
-console.log('✅ - TPI.updateTrendChart: 已添加控制台日志');
-console.log('✅ - TPI.generateMonthlyReport: 已添加控制台日志');
-console.log('✅ - TPIAdvanced: 已定义完整对象');
-console.log('✅ - TemplateSyncManager: 已定义完整对象');
-console.log('✅ ═══════════════════════════════════════════════════════');
+// 批次17修复完成
 
 // ═══════════════════════════════════════════════════════════════════
 // 批次18修复 - 导出导入功能控制台日志增强
@@ -28602,13 +28581,7 @@ if (typeof window.TPI !== 'undefined') {
         console.log('✅ [批次18] TPI.importAllData 已存在');
     }
     
-    console.log('✅ ═══════════════════════════════════════════════════════');
-    console.log('✅ 批次18修复完成 - 导出导入功能已增强');
-    console.log('✅ - exportAllData: 已添加详细控制台日志');
-    console.log('✅ - importAllData: 已添加详细控制台日志');
-    console.log('✅ - TPIAdvanced.generateReport: 已添加详细日志');
-    console.log('✅ - 所有功能现在都有完整的调试信息');
-    console.log('✅ ═══════════════════════════════════════════════════════');
+    // 批次18修复完成
 }
 
    // ═══════════════════════════════════════════════════════════════════
@@ -28658,8 +28631,6 @@ if (typeof window.TPI !== 'undefined') {
     console.log('');
     console.log('🔍 ═══════════════════════════════════════════════════════');
     console.log('🔍 【第5批次】数据完整性检查启动');
-    console.log('🔍 检查时间:', new Date().toLocaleString());
-    console.log('🔍 ═══════════════════════════════════════════════════════');
     
     try {
         // 检查localStorage可用性
@@ -28673,10 +28644,6 @@ if (typeof window.TPI !== 'undefined') {
         const tpiDataKeys = allKeys.filter(key => key.startsWith('tpi_data_'));
         const tpiBackupKeys = allKeys.filter(key => key.startsWith('tpi_backup_'));
         
-        console.log('📊 数据统计:');
-        console.log('  - TPI数据记录:', tpiDataKeys.length, '条');
-        console.log('  - 备份记录:', tpiBackupKeys.length, '条');
-        console.log('  - 总存储键:', allKeys.length, '个');
         
         // 计算存储空间使用
         let totalSize = 0;
@@ -28688,7 +28655,6 @@ if (typeof window.TPI !== 'undefined') {
         });
         
         const sizeMB = (totalSize / 1024 / 1024).toFixed(2);
-        console.log('💾 存储空间: 约', sizeMB, 'MB');
         
         // 验证数据完整性
         let validCount = 0;
@@ -28714,7 +28680,6 @@ if (typeof window.TPI !== 'undefined') {
             }
         });
         
-        console.log('✅ 有效数据:', validCount, '条');
         if (invalidCount > 0) {
             console.warn('⚠️ 无效数据:', invalidCount, '条');
             invalidKeys.forEach(key => console.warn('  -', key));
@@ -28725,9 +28690,7 @@ if (typeof window.TPI !== 'undefined') {
         const hasTodayData = __tpi_ls_get(todayKey) !== null;
         
         if (hasTodayData) {
-            console.log('✅ 今日数据已存在');
         } else {
-            console.log('ℹ️ 今日数据尚未保存');
         }
         
         // 检查配置项
@@ -28735,18 +28698,11 @@ if (typeof window.TPI !== 'undefined') {
         const lastBackup = __tpi_ls_get('tpi_last_backup');
         const lastCheck = __tpi_ls_get('tpi_last_update_check');
         
-        console.log('⚙️ 配置信息:');
-        console.log('  - 暗黑模式:', darkMode || '未设置');
-        console.log('  - 最后备份:', lastBackup ? new Date(parseInt(lastBackup)).toLocaleString() : '从未备份');
-        console.log('  - 最后检查更新:', lastCheck ? new Date(parseInt(lastCheck)).toLocaleString() : '从未检查');
         
         console.log('✅ 数据完整性检查完成');
-        console.log('🔍 ═══════════════════════════════════════════════════════');
-        console.log('');
         
         // 如果有数据，提供快速统计
         if (validCount > 0) {
-            console.log('📈 快速统计（最近数据）:');
             
             // 获取最近7天的TPI分数
             const recentScores = [];
@@ -28775,16 +28731,12 @@ if (typeof window.TPI !== 'undefined') {
             }
             
             if (recentScores.length > 0) {
-                console.log('  最近', recentScores.length, '天有数据:');
                 recentScores.forEach(item => {
-                    console.log('    -', item.date, ':', item.score.toFixed(1), '分');
                 });
                 
                 const avgRecent = recentScores.reduce((sum, item) => sum + item.score, 0) / recentScores.length;
-                console.log('  平均TPI分数:', avgRecent.toFixed(1), '分');
             }
             
-            console.log('');
         }
         
     } catch (error) {
@@ -31086,10 +31038,8 @@ try{
                 
                 // 更新评级
                 this.updateRating(tpiTotal);
-                
-                console.log(`✅ [分数看板] 更新成功: AMI=${amiScore}, BCM=${bcmScore}, LOG=${logisticsScore}, HSM=${hsmScore}, FLI=${fliScore}, BONUS=${bonusScore}, Total=${tpiTotal}`);
             } catch (error) {
-                console.error('❌ [分数看板] 更新失败:', error);
+                // 静默失败，避免控制台spam
             }
         };
         
@@ -31543,6 +31493,8 @@ try{
    - 仍以本页现有 localStorage/collectDailyData/restoreUIFromData 为数据载体
 ========================================================= */
 (function(){
+  // ⚠️ 全局安全：防止"overlay is not defined"类型的ReferenceError
+  if (typeof window.overlay === 'undefined') window.overlay = null;
   // ⚠️ TODO: 请替换为你的 Appwrite 配置
   const APPWRITE_ENDPOINT = 'https://sgp.cloud.appwrite.io/v1'; // 你的 Appwrite 端点
   const APPWRITE_PROJECT_ID = '698d998e003c903490e1'; // 你的项目 ID
@@ -32656,6 +32608,10 @@ window.addEventListener('beforeunload', async (e) => {
 
 // 🔥 保障7：页面加载时检查未保存数据
 window.checkUnsavedData = async function() {
+    // 使用 sessionStorage 防止同一会话中多次弹出
+    if (sessionStorage.getItem('tpi_unsaved_check_done')) return;
+    sessionStorage.setItem('tpi_unsaved_check_done', '1');
+
     const today = getTodayString();
     const unsavedData = __tpi_ls_get('tpi_unsaved_data_' + today);
     const timestamp = __tpi_ls_get('tpi_unsaved_timestamp');
@@ -32665,41 +32621,14 @@ window.checkUnsavedData = async function() {
         const now = new Date();
         const minutesDiff = (now - unsavedTime) / 1000 / 60;
         
+        // 无论时间多久，先清除标记，防止下次再弹
+        __tpi_ls_remove('tpi_unsaved_data_' + today);
+        __tpi_ls_remove('tpi_unsaved_timestamp');
+
         if (minutesDiff < 30) { // 30分钟内的未保存数据
-            __tpi_log('⚠️ [启动检查] 发现未保存数据，时间:', timestamp);
-
-            // 兜底：本次会话内避免反复弹出（即使上传失败，也先冷却一段时间）
-            const __todayKey = 'tpi_unsaved_prompted_' + today;
-            const __cooldownMs = 30 * 60 * 1000; // 30 分钟冷却
-            let __lastPrompt = 0;
-            try { __lastPrompt = Number(sessionStorage.getItem(__todayKey) || '0'); } catch(e) {}
-            if (__lastPrompt && (Date.now() - __lastPrompt) < __cooldownMs) {
-                // 最近已提示过，跳过
-            } else {
-                try { sessionStorage.setItem(__todayKey, String(Date.now())); } catch(e) {}
-
-                const __ask = async () => {
-                    return new Promise((resolve) => {
-                        // 优先使用页面弹窗（可关闭），没有就降级 confirm
-                        if (typeof window.showModal === 'function') {
-                            window.showModal({
-                                type: 'warning',
-                                title: '发现未保存的数据',
-                                message: '发现未保存的数据（' + Math.floor(minutesDiff) + '分钟前），是否上传到云端？',
-                                confirmText: '上传',
-                                cancelText: '取消',
-                                showCancel: true,
-                                showConfirm: true,
-                                onConfirm: () => resolve(true),
-                                onCancel: () => resolve(false)
-                            });
-                        } else {
-                            resolve(confirm('发现未保存的数据（' + Math.floor(minutesDiff) + '分钟前），是否上传到云端？'));
-                        }
-                    });
-                };
-
-                if (await __ask()) {
+            console.log('⚠️ [启动检查] 发现未保存数据，时间:', timestamp);
+            
+            if (confirm('发现未保存的数据（' + Math.floor(minutesDiff) + '分钟前），是否上传到云端？')) {
                 try {
                     const snapshot = JSON.parse(unsavedData);
                     
@@ -32711,20 +32640,11 @@ window.checkUnsavedData = async function() {
                     // 然后保存到云端
                     await saveTodaysData();
                     
-                    // 清除未保存标记
-                    __tpi_ls_remove('tpi_unsaved_data_' + today);
-                    __tpi_ls_remove('tpi_unsaved_timestamp');
-                    
                     console.log('✅ [启动检查] 未保存数据已上传');
                 } catch(error) {
                     console.error('❌ [启动检查] 上传失败:', error);
                 }
             }
-            }
-        } else {
-            // 超过30分钟，清除旧数据
-            __tpi_ls_remove('tpi_unsaved_data_' + today);
-            __tpi_ls_remove('tpi_unsaved_timestamp');
         }
     }
 };
@@ -34072,61 +33992,7 @@ document.addEventListener('DOMContentLoaded', function() {
 console.log('✅ [TPI优化] 函数增强包装器已加载');
 </script>
 
-<!-- 快照管理按钮注入（原位修复：移至
-<script>
-// === 全局兜底：任何弹窗都必须能关闭（解决 overlay/事件绑定异常导致无法关闭）===
-(function(){
-  if (window.__tpi_global_modal_delegate_installed) return;
-  window.__tpi_global_modal_delegate_installed = true;
-
-  function closeOverlay(overlay){
-    try{
-      if(!overlay) return;
-      // 动画淡出（如果有）
-      overlay.classList?.add?.('modal-exit');
-      overlay.style?.setProperty?.('animation', 'modalFadeOut 0.2s ease-out', 'important');
-      setTimeout(()=>{ try{ overlay.remove(); }catch(e){} }, 220);
-    }catch(e){}
-  }
-
-  document.addEventListener('click', function(e){
-    const t = e.target;
-    if(!t) return;
-
-    // 1) 任何“确定/取消/知道了/✕/关闭”按钮
-    const btn = (t.closest && (t.closest('.modal-confirm-btn') || t.closest('.modal-cancel-btn') || t.closest('.modal-close-x-btn') || t.closest('.modal-close-btn') || t.closest('.modal-close') ));
-    if(btn){
-      const overlay = btn.closest && btn.closest('.modal-overlay');
-      if(overlay){
-        e.preventDefault?.();
-        e.stopPropagation?.();
-        closeOverlay(overlay);
-        return;
-      }
-      // 某些旧弹窗不是 modal-overlay，用 modal 容器兜底
-      const legacy = btn.closest && btn.closest('.modal');
-      if(legacy){
-        e.preventDefault?.();
-        e.stopPropagation?.();
-        try{ legacy.remove(); }catch(_){}
-        return;
-      }
-    }
-
-    // 2) 右上角 X（有些用 aria-label / title 标识）
-    if(t.matches && (t.matches('[aria-label="关闭"]') || t.matches('[title="关闭"]'))){
-      const overlay = t.closest && t.closest('.modal-overlay');
-      if(overlay){
-        e.preventDefault?.();
-        e.stopPropagation?.();
-        closeOverlay(overlay);
-      }
-    }
-  }, true);
-})();
-</script>
-
-</body>前正确位置） -->
+<!-- 快照管理按钮注入（原位修复：移至</body>前正确位置） -->
 <script>
 </script>
 
@@ -34550,57 +34416,22 @@ try {
 
 
 <script>
-// === 全局兜底：任何弹窗都必须能关闭（解决 overlay/事件绑定异常导致无法关闭）===
-(function(){
-  if (window.__tpi_global_modal_delegate_installed) return;
-  window.__tpi_global_modal_delegate_installed = true;
-
-  function closeOverlay(overlay){
-    try{
-      if(!overlay) return;
-      // 动画淡出（如果有）
-      overlay.classList?.add?.('modal-exit');
-      overlay.style?.setProperty?.('animation', 'modalFadeOut 0.2s ease-out', 'important');
-      setTimeout(()=>{ try{ overlay.remove(); }catch(e){} }, 220);
-    }catch(e){}
-  }
-
-  document.addEventListener('click', function(e){
-    const t = e.target;
-    if(!t) return;
-
-    // 1) 任何“确定/取消/知道了/✕/关闭”按钮
-    const btn = (t.closest && (t.closest('.modal-confirm-btn') || t.closest('.modal-cancel-btn') || t.closest('.modal-close-x-btn') || t.closest('.modal-close-btn') || t.closest('.modal-close') ));
-    if(btn){
-      const overlay = btn.closest && btn.closest('.modal-overlay');
-      if(overlay){
-        e.preventDefault?.();
-        e.stopPropagation?.();
-        closeOverlay(overlay);
-        return;
-      }
-      // 某些旧弹窗不是 modal-overlay，用 modal 容器兜底
-      const legacy = btn.closest && btn.closest('.modal');
-      if(legacy){
-        e.preventDefault?.();
-        e.stopPropagation?.();
-        try{ legacy.remove(); }catch(_){}
-        return;
-      }
-    }
-
-    // 2) 右上角 X（有些用 aria-label / title 标识）
-    if(t.matches && (t.matches('[aria-label="关闭"]') || t.matches('[title="关闭"]'))){
-      const overlay = t.closest && t.closest('.modal-overlay');
-      if(overlay){
-        e.preventDefault?.();
-        e.stopPropagation?.();
-        closeOverlay(overlay);
-      }
-    }
-  }, true);
+/* ===== TPI 控制台日志精简 =====
+   将调试级别的console.log静默化，只保留error/warn
+   如需调试，在控制台运行: window.TPI_DEBUG = true; location.reload()
+*/
+(function() {
+  if (sessionStorage.getItem('TPI_DEBUG') === 'true' || window.TPI_DEBUG) return;
+  var _origLog = console.log;
+  var _allowedPrefixes = ['❌','🚨','⚠️ [核心]'];
+  console.log = function() {
+    if (window.TPI_DEBUG) { _origLog.apply(console, arguments); return; }
+    // 只允许少数关键日志
+    var msg = String(arguments[0] || '');
+    // 静默所有普通调试log
+  };
+  // 保留console.warn和console.error
 })();
 </script>
-
 </body>
 </html>
