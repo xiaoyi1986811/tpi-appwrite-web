@@ -4462,7 +4462,7 @@ if (typeof window.showModal === 'undefined') {
           closeModal();
         }
       };
-      overlay.addEventListener('click', __delegateClose, true);
+      modal.addEventListener('click', __delegateClose, true);
 
         if (confirmBtn) {
             confirmBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
@@ -5601,6 +5601,59 @@ window.exportAsCSV = function() {
   #tpi-top-scoreboard .pill.total .value{ min-width:46px; }
 }
 </style>
+
+<script>/* TPI_CONSOLE_QUIET_PATCH_V1 */
+(function(){
+  try {
+    // 默认静默：避免控制台刷屏。需要调试时：localStorage.setItem('tpi_debug','1'); 然后刷新
+    var enabled = false;
+    try { enabled = (localStorage.getItem('tpi_debug') === '1'); } catch(e) {}
+    if (enabled) return;
+
+    var orig = {
+      log: console.log.bind(console),
+      info: console.info ? console.info.bind(console) : console.log.bind(console),
+      debug: console.debug ? console.debug.bind(console) : console.log.bind(console),
+      warn: console.warn ? console.warn.bind(console) : console.log.bind(console),
+      error: console.error ? console.error.bind(console) : console.log.bind(console),
+    };
+
+    function isNoisy(args) {
+      try {
+        if (!args || !args.length) return false;
+        var a0 = args[0];
+        var s = (typeof a0 === 'string') ? a0 : (a0 && a0.message ? String(a0.message) : '');
+        if (!s) return false;
+        // 过滤本项目大量的状态/调试日志（不影响错误输出）
+        if (s.includes('[FutureRadar DEBUG]')) return true;
+        if (s.includes('[雷达修复]')) return true;
+        if (s.includes('[TPI优化]')) return true;
+        if (s.includes('[云端同步]')) return true;
+        if (s.includes('[Storage]')) return true;
+        if (s.includes('批次') && s.includes('修复')) return true;
+        if (/^\s*[✅🔄🔍🔧📦📤📢🛡️🚀⚙️📊📈📝🎯]/.test(s)) return true;
+        return false;
+      } catch(e) {
+        return false;
+      }
+    }
+
+    console.log = function() {
+      if (isNoisy(arguments)) return;
+      return orig.log.apply(console, arguments);
+    };
+    console.info = function() {
+      if (isNoisy(arguments)) return;
+      return orig.info.apply(console, arguments);
+    };
+    console.debug = function() {
+      if (isNoisy(arguments)) return;
+      return orig.debug.apply(console, arguments);
+    };
+    // warn/error 保留，便于看见真正的问题
+  } catch(e) {}
+})();
+</script>
 </head>
 <body>
 <!-- ===== 顶部置顶分数看板（与截图一致） ===== -->
