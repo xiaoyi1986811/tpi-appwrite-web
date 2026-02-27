@@ -31317,6 +31317,9 @@ try{
                 const doneContainer = document.getElementById(`list-${key}-done`);
                 if (!listContainer) return;
 
+                // 注入工具栏（与原版 renderSection 一致，防止 patch 覆盖后工具栏丢失）
+                try { if (typeof this.ensureSectionToolbar === 'function') this.ensureSectionToolbar(key); } catch(_et) {}
+
                 // [FIX v3] 如果 this.data[key] 为空，尝试从存储重新读取（防止 loadData 在 IndexedDB 预载前运行导致数据丢失）
                 let items = this.data[key] || [];
                 if (items.length === 0) {
@@ -31589,9 +31592,6 @@ var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new 
   // 当前会话（Appwrite 自动管理）
   let TPI_CURRENT_USER = null;
   let TPI_CURRENT_PASSWORD = null;
-
-    try { localStorage.removeItem('tpi_appwrite_jwt'); } catch(e) {}
-    try { client.setJWT(''); } catch(e) {}
 
   function tpiShowMsg(elementId, text, isError){
     const ids = [elementId];
@@ -32066,10 +32066,12 @@ window.__tpi_syncDateToMain = function(){
 
       // 先清空再恢复，避免"残留旧值"导致差异
 // 但保留少量"设备本地"键（不参与跨设备同步），避免误判为缓存或破坏本机标识
-const __preserveKeys = ['tpi_device_id', 'tpi_error_log'];
+const __preserveKeys = ['tpi_device_id', 'tpi_error_log', KEY_USER, 'tpi_appwrite_jwt', 'tpi_backend_token'];
 const __preserved = {};
 try{
   __preserveKeys.forEach(k => { const v = __tpi_ls_get(k); if (v != null) __preserved[k] = v; });
+  // 额外从 localStorage 直接读取 JWT（防止 IndexedDB 缓存层覆盖）
+  try { const _jwt = localStorage.getItem('tpi_appwrite_jwt'); if (_jwt) __preserved['tpi_appwrite_jwt'] = _jwt; } catch(_e) {}
 }catch(e){}
 
 const beforeKeys = __tpi_ls_length(0);
@@ -32085,6 +32087,22 @@ try{
     if (__tpi_ls_get(k) == null) __tpi_ls_set(k, __preserved[k]);
   });
 }catch(e){}
+
+// ✅ 【关键修复】：同步下载后恢复登录态，防止退出到登录页
+try {
+  // 恢复 JWT 到 localStorage 和 Appwrite 客户端
+  const _restoredJwt = __preserved['tpi_appwrite_jwt'] || null;
+  if (_restoredJwt) {
+    try { localStorage.setItem('tpi_appwrite_jwt', _restoredJwt); } catch(_e) {}
+    try { client.setJWT(_restoredJwt); } catch(_e) {}
+  }
+  // 恢复用户名并刷新登录 UI（防止因存储清空导致退出登录态）
+  const _restoredUser = __preserved[KEY_USER] || __tpi_ls_get(KEY_USER) || '';
+  if (TPI_CURRENT_USER || _restoredJwt) {
+    // 已有活动会话（内存中有 TPI_CURRENT_USER）或有 JWT，直接刷新 UI 为登录状态
+    setLoggedInUI(_restoredUser || '');
+  }
+} catch(_e) {}
 
 console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).length} 个键)`);
 
