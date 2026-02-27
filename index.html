@@ -8048,74 +8048,7 @@ try {
         } catch (e) {
             // 忽略迁移失败
         }
-    }
 
-
-            if (raw) {
-                try { normalize(JSON.parse(raw)); return true; } catch (e) { console.error('雷达数据解析失败', e); }
-            }
-            return false;
-        };
-
-        // 先同步尝试一次（大多数情况下已足够）
-        if (tryLoadOnce()) return;
-
-        // 如果同步读取为空，很可能是 IndexedDB 预载还没完成：做短轮询 + 异步读取兜底
-        let attempts = 0;
-        const maxAttempts = 25; // 约 5 秒（200ms * 25）
-        const tick = () => {
-            attempts++;
-            if (tryLoadOnce()) {
-                try { self.render(); } catch (e) {}
-                return;
-            }
-            if (attempts >= maxAttempts) {
-                // 最后兜底：直接从 IndexedDB 读（如果提供了异步接口）
-                if (typeof window.__tpi_idb_get_async === 'function') {
-                    window.__tpi_idb_get_async(self.storageKey).then(v => {
-                        if (v) {
-                            try {
-                                normalize(typeof v === 'string' ? JSON.parse(v) : v);
-                                self.render();
-                            } catch (e) { console.error('雷达IDB数据解析失败', e); }
-                        }
-                    }).catch(()=>{});
-                }
-                return;
-            }
-            setTimeout(tick, 200);
-        };
-        setTimeout(tick, 200);
-
-        // 若还没有 v3，就尝试从 v2 迁移（保留原逻辑，但放到异步轮询之后，避免覆盖）
-        try {
-            const v2Raw = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get('tpi_radar_events_v2') : null;
-            if (v2Raw) {
-                const v2 = JSON.parse(v2Raw);
-                const migrated = {};
-                self.categories.forEach(key => {
-                    migrated[key] = Array.isArray(v2[key]) ? v2[key].map(item => ({
-                        ...item,
-                        id: item.id || ('evt_' + Date.now() + '_' + Math.random().toString(16).slice(2)),
-                        timeMode: item.timeMode || 'start',
-                        isContinuous: !!item.isContinuous,
-                        dateEnd: item.dateEnd || '',
-                        timeEnd: item.timeEnd || ''
-                    })) : [];
-                });
-                normalize(migrated);
-                if (typeof window.__tpi_ls_set === 'function') {
-                    window.__tpi_ls_set(self.storageKey, JSON.stringify(self.data));
-                } else {
-                    localStorage.setItem(self.storageKey, JSON.stringify(self.data));
-                }
-            }
-        } catch (e) {
-            // 忽略迁移失败
-        }
-    }
-
-        }
 
         // ✅ 修复：防止历史/异常数据把分类写成非数组，导致 forEach 报错
         try {
