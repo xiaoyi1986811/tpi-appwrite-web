@@ -31855,22 +31855,8 @@ window.__tpi_syncDateToMain = function(){
     return String(raw).trim().replace(/\//g,'-');
   }
   async function __tpi_getAuth(){
-    // ✅ 关键修复：Edge/无痕模式可能拦截第三方 Cookie，导致 account.get() 401
-    // 解决：优先用已持久化的 JWT 进行鉴权；若第一次失败则自动补打一针 JWT 再重试一次
-    try{
-      const u = await account.get(); // throws if not logged in
-      return u;
-    }catch(e1){
-      try{
-        const jwt = (function(){ try{ return localStorage.getItem('tpi_appwrite_jwt') || ''; }catch(_e){ return ''; } })();
-        if(jwt){
-          try{ client.setJWT(jwt); }catch(_e){}
-          const u2 = await account.get();
-          return u2;
-        }
-      }catch(e2){}
-      throw e1;
-    }
+    const u = await account.get(); // throws if not logged in
+    return u;
   }
   function __tpi_getSyncDate(){
     const raw = (document.getElementById('tpi-sync-date')?.value || '').trim();
@@ -31954,12 +31940,32 @@ window.__tpi_syncDateToMain = function(){
         if (tpiEl) __tpi_total_score_upload = (tpiEl.value || tpiEl.textContent || '').trim();
       } catch(e) {}
 
-      // 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
+      
+      // ✅ [FIX] 确保「未来事件雷达」最新编辑已落盘（否则上传可能拿到旧数据）
+      try {
+        if (window.FutureRadar && typeof window.FutureRadar.saveData === 'function') {
+          window.FutureRadar.saveData();
+          console.log('✅ [上传][FIX] 已强制保存未来事件雷达数据');
+        }
+      } catch(e) { console.warn('⚠️ [上传][FIX] FutureRadar.saveData 失败(忽略):', e); }
+// 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
       console.log('📦 [上传] 正在打包 localStorage 数据...');
       const payload = {};
       // IndexedDB唯一数据源版：从内存缓存打包，不依赖 localStorage
       const __memCache = window.__tpi_mem_cache || {};
       Object.keys(__memCache).forEach(function(k){ payload[k] = __memCache[k]; });
+
+      // ✅ [FIX] 强制合并 Future Radar 相关键（避免未写入 mem_cache 导致云端缺失/回滚）
+      const __radarKeys = ['tpi_radar_events_v3','tpi_radar_push_config','tpi_radar_sort_mode_v3','tpi_radar_worker_url','tpi_radar_events_v2'];
+      try {
+        __radarKeys.forEach(function(k){
+          try {
+            const v = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k) : null;
+            if (v !== null && v !== undefined) payload[k] = v;
+          } catch(e) {}
+        });
+      } catch(e) {}
+
       const dataStr = JSON.stringify(payload);
       console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`);
 
@@ -32275,18 +32281,26 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
       
       console.log('✅ [下载] 所有UI刷新和重新计算完成');
       
-      // 步骤6：最终兜底 - 不自动刷新（避免无痕/隐私策略导致登录态丢失与页面跳回登录）
+      // 步骤6：最终兜底 - 如果完全没有恢复成功，才刷新页面
       if (!__uiRestored && !dayData) {
-        console.warn('⚠️ [下载] 未检测到可用的 UI 恢复函数，已完成数据写入，但不会自动刷新页面。');
-        try{
-          if (typeof showModal === 'function') {
-            showModal({type:'info', title:'下载完成', message:'✅ 数据已下载并写入本地存储。\n\n⚠️ 但页面未检测到可用的 UI 恢复函数来立即渲染这些数据。\n\n你可以：\n1) 先点击“知道了”关闭提示；\n2) 如需立即看到完整渲染，请手动刷新页面（F5）。\n\n（我们不自动刷新，以避免无痕/隐私策略导致登录态丢失而跳回登录页）', confirmText:'知道了'});
-          }
-        }catch(_e){}
-        // 认为已经完成兜底处理，避免任何后续逻辑触发自动刷新
-        __uiRestored = true;
+        console.log('⚠️ [下载][FIX] 未能通过函数完全恢复UI：执行模块级重渲染兜底（不刷新页面）...');
       }
+      // ✅ [FIX] 无论是否完全恢复，都强制 FutureRadar 重新读取并渲染（确保云端下载后全部事件可见）
+      try {
+        if (window.FutureRadar && typeof window.FutureRadar.loadData === 'function') window.FutureRadar.loadData();
+        if (window.FutureRadar && typeof window.FutureRadar.render === 'function') window.FutureRadar.render();
+      } catch(e) { console.warn('⚠️ [下载][FIX] FutureRadar 重渲染失败(忽略):', e); }
 
+
+      // ✅ [FIX] 下载后再延迟一次 FutureRadar 重载（确保 IDB 写入/预载时序下也能完整渲染）
+      try {
+        setTimeout(function(){
+          try {
+            if (window.FutureRadar && typeof window.FutureRadar.loadData === 'function') window.FutureRadar.loadData();
+            if (window.FutureRadar && typeof window.FutureRadar.render === 'function') window.FutureRadar.render();
+          } catch(e) {}
+        }, 120);
+      } catch(e) {}
 const __download_end_time = Date.now();
       console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
 
@@ -32402,12 +32416,6 @@ const __download_end_time = Date.now();
 
       // 尝试获取当前用户（检查是否有活动会话）
       try {
-        // ✅ 关键修复：启动时先注入已保存 JWT，避免无痕/隐私策略拦截 Cookie 后误判“未登录”
-        try {
-          const jwt = (function(){ try{ return localStorage.getItem('tpi_appwrite_jwt') || ''; }catch(_e){ return ''; } })();
-          if (jwt) { try { client.setJWT(jwt); } catch(_e) {} }
-        } catch(_e) {}
-
         const user = await account.get();
         if (user && user.$id) {
           console.log('✅ 检测到活动会话:', user.email);
