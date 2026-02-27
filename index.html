@@ -31855,8 +31855,22 @@ window.__tpi_syncDateToMain = function(){
     return String(raw).trim().replace(/\//g,'-');
   }
   async function __tpi_getAuth(){
-    const u = await account.get(); // throws if not logged in
-    return u;
+    // ✅ 关键修复：Edge/无痕模式可能拦截第三方 Cookie，导致 account.get() 401
+    // 解决：优先用已持久化的 JWT 进行鉴权；若第一次失败则自动补打一针 JWT 再重试一次
+    try{
+      const u = await account.get(); // throws if not logged in
+      return u;
+    }catch(e1){
+      try{
+        const jwt = (function(){ try{ return localStorage.getItem('tpi_appwrite_jwt') || ''; }catch(_e){ return ''; } })();
+        if(jwt){
+          try{ client.setJWT(jwt); }catch(_e){}
+          const u2 = await account.get();
+          return u2;
+        }
+      }catch(e2){}
+      throw e1;
+    }
   }
   function __tpi_getSyncDate(){
     const raw = (document.getElementById('tpi-sync-date')?.value || '').trim();
@@ -32384,6 +32398,12 @@ const __download_end_time = Date.now();
 
       // 尝试获取当前用户（检查是否有活动会话）
       try {
+        // ✅ 关键修复：启动时先注入已保存 JWT，避免无痕/隐私策略拦截 Cookie 后误判“未登录”
+        try {
+          const jwt = (function(){ try{ return localStorage.getItem('tpi_appwrite_jwt') || ''; }catch(_e){ return ''; } })();
+          if (jwt) { try { client.setJWT(jwt); } catch(_e) {} }
+        } catch(_e) {}
+
         const user = await account.get();
         if (user && user.$id) {
           console.log('✅ 检测到活动会话:', user.email);
