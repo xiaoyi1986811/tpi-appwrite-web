@@ -112,6 +112,17 @@ window.__tpi_force = (typeof window.__tpi_force === 'boolean') ? window.__tpi_fo
             (req.result||[]).forEach(function(r){ if(r&&r.k) _mem[r.k]=r.v; });
             _memReady = true;
             console.log('[Storage] IndexedDB预载完成，共', Object.keys(_mem).length, '条');
+            // [FIX v3] 预载完成后，如果 FutureRadar 已初始化，触发一次 reload 以确保数据正确渲染
+            setTimeout(function(){
+              try {
+                if (window.FutureRadar && typeof window.FutureRadar.loadData === 'function') {
+        // ✅ 预载完成后强制再次读取雷达数据并渲染（避免首次读取为空）
+                  console.log('[FIX v3] IndexedDB预载完成，触发 FutureRadar 重新加载数据...');
+                  window.FutureRadar.loadData();
+                  if (typeof window.FutureRadar.render === 'function') window.FutureRadar.render();
+                }
+              } catch(e) {}
+            }, 100);
           }catch(e){}
         };
       }catch(e){ _memReady=true; }
@@ -192,33 +203,44 @@ window.__tpi_force = (typeof window.__tpi_force === 'boolean') ? window.__tpi_fo
   /* ── 暴露内存缓存供外部代码使用（替代 Object.keys(window.__tpi_mem_cache||{})） ── */
   window.__tpi_mem_cache = _mem;
 
+  // ✅ 兜底：防止 AutoSaveManager 未定义导致的全局报错（不改变现有功能，只提供空实现）
+  if (typeof window.AutoSaveManager === 'undefined') {
+    window.AutoSaveManager = {
+      start: function(){},
+      stop: function(){},
+      save: function(){},
+      load: function(){}
+    };
+  }
+
   /* ── 统一公开接口（兼容全站所有 __tpi_ls_* 调用） ── */
   window.__tpi_ls_get = function(key, defaultValue){
-    // 优先内存缓存（IndexedDB预载）
-    if(_memReady && Object.prototype.hasOwnProperty.call(_mem,key)){
+    // [FIX v3] 优先内存缓存（不再依赖 _memReady，_mem 随写随读）
+    if(Object.prototype.hasOwnProperty.call(_mem, key)){
       var cv = _mem[key];
       return (cv!==null && cv!==undefined) ? cv : (defaultValue===undefined ? null : defaultValue);
     }
-    // 白名单配置键可回退 localStorage（token/theme等在页面加载前可能已存在）
-    if(_isWhitelist(key)){
-      try{
-        var ls = _getLS(); if(!ls) return (defaultValue===undefined?null:defaultValue);
+    // 回退 localStorage（白名单 + 所有键兜底，防止 IndexedDB 未预载完时丢数据）
+    try{
+      var ls = _getLS(); if(ls){
         var v  = ls.getItem(key);
         if(v!==null && v!==undefined){ _mem[key]=v; return v; }
-      }catch(e){ _warn('读取', key, e); }
-    }
+      }
+    }catch(e){ _warn('读取', key, e); }
     return (defaultValue===undefined?null:defaultValue);
   };
 
   window.__tpi_ls_set = function(key, value){
     _idbSet(key, value);          // 主存储：IndexedDB + 内存缓存（所有键）
-    // 白名单配置键同步写 localStorage，以便同步代码快速读取
-    if(_isWhitelist(key)){
-      try{
-        var ls = _getLS(); if(!ls) return true;
-        ls.setItem(key, value);
-      }catch(e){ _warn('写入(LS)', key, e); }
-    }
+    // [FIX v3] 所有键都同步写 localStorage（兜底，防止 IndexedDB 预载慢时同步读取失败）
+    try{
+      var ls = _getLS(); if(ls){
+        try{ ls.setItem(key, value); }catch(e2){
+          // localStorage 满则尝试删除旧的雷达无关数据再重试
+          try{ ls.setItem(key, value); }catch(e3){}
+        }
+      }
+    }catch(e){ _warn('写入(LS)', key, e); }
     return true;
   };
 
@@ -7910,11 +7932,29 @@ try {
 
     }
     init() {
-        this.loadData();
-        this.render();
-        this.checkPushOnLoad();
-        // 启动当天精细提醒定时器（每分钟检查）
-        setTimeout(() => this.startSameDayReminderTimer(), 2000);
+        // [FIX v3] 等待 IndexedDB 预载完成后再加载数据，防止 _mem 为空时读不到 radar 数据
+        const doInit = () => {
+            this.loadData();
+            this.render();
+            try { this.checkPushOnLoad(); } catch(e) {}
+            setTimeout(() => { try { this.startSameDayReminderTimer(); } catch(e){} }, 2000);
+        };
+        const _tryInit = (attempt) => {
+            attempt = attempt || 0;
+            try {
+                // 检查 IndexedDB 是否已预载：尝试读取 radar key，能读到或已超时则执行
+                const raw = window.__tpi_ls_get ? window.__tpi_ls_get('tpi_radar_events_v3') : null;
+                if (raw || attempt >= 30) {
+                    doInit();
+                } else {
+                    setTimeout(() => _tryInit(attempt + 1), 100);
+                }
+            } catch(e) {
+                doInit();
+            }
+        };
+        // 延迟 50ms 启动，让 IndexedDB _preload 有机会先完成
+        setTimeout(() => _tryInit(0), 50);
     }
 
     reload() {
@@ -7923,24 +7963,158 @@ try {
     }
 
     loadData() {
-        // 尝试加载 v3 数据
-        const saved = __tpi_ls_get(this.storageKey);
-        if (saved) {
+        // ✅ 更稳的加载：优先使用双层存储封装（__tpi_ls_get / __tpi_idb_get_async），避免“预载未完成时读取为空”
+        const self = this;
+
+        const normalize = (obj) => {
+            if (!obj || typeof obj !== 'object') return;
+            self.data = { ...self.data, ...obj };
+            self.categories.forEach(k => {
+                if (!Array.isArray(self.data[k])) self.data[k] = [];
+            });
+        };
+
+        const tryLoadOnce = () => {
+            // 1) __tpi_ls_get（可能会从 mem_cache / localStorage 返回）
+            let raw = null;
             try {
-                const parsed = JSON.parse(saved);
-                this.data = { ...this.data, ...parsed };
-            } catch (e) { console.error('雷达数据解析失败', e); }
-        } else {
-            // 尝试从 v2 迁移 (简易迁移)
-            const v2 = __tpi_ls_get('tpi_radar_events_v2');
-            if (v2) {
-                try {
-                    const oldData = JSON.parse(v2);
-                    if (oldData.temp) this.data.tempLife = oldData.temp;
-                    if (oldData.regular) this.data.regularLife = oldData.regular;
-                    __tpi_ls_set(this.storageKey, JSON.stringify(this.data));
-                } catch (e) {}
+                raw = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(self.storageKey) : null;
+            } catch (e) {}
+
+            // 2) 兜底：直接 localStorage
+            if (!raw) {
+                try { raw = localStorage.getItem(self.storageKey); } catch (e) {}
             }
+
+            if (raw) {
+                try { normalize(JSON.parse(raw)); return true; } catch (e) { console.error('雷达数据解析失败', e); }
+            }
+            return false;
+        };
+
+        // 先同步尝试一次（大多数情况下已足够）
+        if (tryLoadOnce()) return;
+
+        // 如果同步读取为空，很可能是 IndexedDB 预载还没完成：做短轮询 + 异步读取兜底
+        let attempts = 0;
+        const maxAttempts = 25; // 约 5 秒（200ms * 25）
+        const tick = () => {
+            attempts++;
+            if (tryLoadOnce()) {
+                try { self.render(); } catch (e) {}
+                return;
+            }
+            if (attempts >= maxAttempts) {
+                // 最后兜底：直接从 IndexedDB 读（如果提供了异步接口）
+                if (typeof window.__tpi_idb_get_async === 'function') {
+                    window.__tpi_idb_get_async(self.storageKey).then(v => {
+                        if (v) {
+                            try {
+                                normalize(typeof v === 'string' ? JSON.parse(v) : v);
+                                self.render();
+                            } catch (e) { console.error('雷达IDB数据解析失败', e); }
+                        }
+                    }).catch(()=>{});
+                }
+                return;
+            }
+            setTimeout(tick, 200);
+        };
+        setTimeout(tick, 200);
+
+        // 若还没有 v3，就尝试从 v2 迁移（保留原逻辑，但放到异步轮询之后，避免覆盖）
+        try {
+            const v2Raw = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get('tpi_radar_events_v2') : null;
+            if (v2Raw) {
+                const v2 = JSON.parse(v2Raw);
+                const migrated = {};
+                self.categories.forEach(key => {
+                    migrated[key] = Array.isArray(v2[key]) ? v2[key].map(item => ({
+                        ...item,
+                        id: item.id || ('evt_' + Date.now() + '_' + Math.random().toString(16).slice(2)),
+                        timeMode: item.timeMode || 'start',
+                        isContinuous: !!item.isContinuous,
+                        dateEnd: item.dateEnd || '',
+                        timeEnd: item.timeEnd || ''
+                    })) : [];
+                });
+                normalize(migrated);
+                if (typeof window.__tpi_ls_set === 'function') {
+                    window.__tpi_ls_set(self.storageKey, JSON.stringify(self.data));
+                } else {
+                    localStorage.setItem(self.storageKey, JSON.stringify(self.data));
+                }
+            }
+        } catch (e) {
+            // 忽略迁移失败
+        }
+    }
+
+
+            if (raw) {
+                try { normalize(JSON.parse(raw)); return true; } catch (e) { console.error('雷达数据解析失败', e); }
+            }
+            return false;
+        };
+
+        // 先同步尝试一次（大多数情况下已足够）
+        if (tryLoadOnce()) return;
+
+        // 如果同步读取为空，很可能是 IndexedDB 预载还没完成：做短轮询 + 异步读取兜底
+        let attempts = 0;
+        const maxAttempts = 25; // 约 5 秒（200ms * 25）
+        const tick = () => {
+            attempts++;
+            if (tryLoadOnce()) {
+                try { self.render(); } catch (e) {}
+                return;
+            }
+            if (attempts >= maxAttempts) {
+                // 最后兜底：直接从 IndexedDB 读（如果提供了异步接口）
+                if (typeof window.__tpi_idb_get_async === 'function') {
+                    window.__tpi_idb_get_async(self.storageKey).then(v => {
+                        if (v) {
+                            try {
+                                normalize(typeof v === 'string' ? JSON.parse(v) : v);
+                                self.render();
+                            } catch (e) { console.error('雷达IDB数据解析失败', e); }
+                        }
+                    }).catch(()=>{});
+                }
+                return;
+            }
+            setTimeout(tick, 200);
+        };
+        setTimeout(tick, 200);
+
+        // 若还没有 v3，就尝试从 v2 迁移（保留原逻辑，但放到异步轮询之后，避免覆盖）
+        try {
+            const v2Raw = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get('tpi_radar_events_v2') : null;
+            if (v2Raw) {
+                const v2 = JSON.parse(v2Raw);
+                const migrated = {};
+                self.categories.forEach(key => {
+                    migrated[key] = Array.isArray(v2[key]) ? v2[key].map(item => ({
+                        ...item,
+                        id: item.id || ('evt_' + Date.now() + '_' + Math.random().toString(16).slice(2)),
+                        timeMode: item.timeMode || 'start',
+                        isContinuous: !!item.isContinuous,
+                        dateEnd: item.dateEnd || '',
+                        timeEnd: item.timeEnd || ''
+                    })) : [];
+                });
+                normalize(migrated);
+                if (typeof window.__tpi_ls_set === 'function') {
+                    window.__tpi_ls_set(self.storageKey, JSON.stringify(self.data));
+                } else {
+                    localStorage.setItem(self.storageKey, JSON.stringify(self.data));
+                }
+            }
+        } catch (e) {
+            // 忽略迁移失败
+        }
+    }
+
         }
 
         // ✅ 修复：防止历史/异常数据把分类写成非数组，导致 forEach 报错
@@ -19918,11 +20092,44 @@ if (!calculateTPI_original) {
     }
 });
 
-// [第 20 版.2 新增] 恢复未来事件雷达数据
+// [第 20 版.2 新增] 恢复未来事件雷达数据（[FIX v3] 改为合并策略，不覆盖本地独有事件）
 if (data.futureRadarV3) {
-    __tpi_ls_set('tpi_radar_events_v3', JSON.stringify(data.futureRadarV3));
-    if (window.FutureRadar) {
-        window.__tpi_safeReloadFutureRadar();
+    try {
+        const cloudRadar = (typeof data.futureRadarV3 === 'string') ? JSON.parse(data.futureRadarV3) : data.futureRadarV3;
+        const keys = ['tempLife','tempAcademic','regularLife','regularAcademic'];
+        // 读取本地现有 radar 数据
+        const localRaw = __tpi_ls_get('tpi_radar_events_v3');
+        const localRadar = localRaw ? (typeof localRaw === 'string' ? JSON.parse(localRaw) : localRaw) : {};
+        const merged = {};
+        keys.forEach(k => {
+            const localArr = (localRadar[k] || []);
+            const cloudArr = (cloudRadar[k] || []);
+            // 以 id 为主键合并，本地有则保留，云端有本地没有则添加
+            const idMap = {};
+            localArr.forEach(ev => { if (ev && ev.id) idMap[ev.id] = ev; });
+            cloudArr.forEach(ev => {
+                if (!ev || !ev.id) return;
+                if (!idMap[ev.id]) {
+                    // 云端独有：合并进来
+                    idMap[ev.id] = ev;
+                } else {
+                    // 两边都有：比较 updatedAt/lastModified，取较新者
+                    const localTs = idMap[ev.id].updatedAt || idMap[ev.id].lastModified || 0;
+                    const cloudTs = ev.updatedAt || ev.lastModified || 0;
+                    if (cloudTs > localTs) idMap[ev.id] = ev;
+                }
+            });
+            merged[k] = Object.values(idMap);
+        });
+        __tpi_ls_set('tpi_radar_events_v3', JSON.stringify(merged));
+        if (window.FutureRadar) {
+            window.FutureRadar.data = merged;
+            window.__tpi_safeReloadFutureRadar();
+        }
+    } catch(e) {
+        // 合并失败时直接覆盖（降级）
+        __tpi_ls_set('tpi_radar_events_v3', JSON.stringify(data.futureRadarV3));
+        if (window.FutureRadar) { window.__tpi_safeReloadFutureRadar(); }
     }
 }
 
@@ -31090,7 +31297,23 @@ try{
                 const doneContainer = document.getElementById(`list-${key}-done`);
                 if (!listContainer) return;
 
-                const items = this.data[key] || [];
+                // [FIX v3] 如果 this.data[key] 为空，尝试从存储重新读取（防止 loadData 在 IndexedDB 预载前运行导致数据丢失）
+                let items = this.data[key] || [];
+                if (items.length === 0) {
+                    try {
+                        const rawFresh = window.__tpi_ls_get ? window.__tpi_ls_get('tpi_radar_events_v3') : null;
+                        if (rawFresh) {
+                            const parsedFresh = (typeof rawFresh === 'string') ? JSON.parse(rawFresh) : rawFresh;
+                            if (parsedFresh && Array.isArray(parsedFresh[key]) && parsedFresh[key].length > 0) {
+                                // 更新 this.data 并取最新数据
+                                this.data = { tempLife:[], tempAcademic:[], regularLife:[], regularAcademic:[], ...this.data, ...parsedFresh };
+                                items = this.data[key] || [];
+                            }
+                        }
+                    } catch (freshErr) {
+                        console.warn('[FutureRadar FIX] re-read failed:', freshErr);
+                    }
+                }
                 const allPending = items.filter(i => !i.completed);
                 // 分组：今日已过期 vs 未来/今日未过期
                 const pending        = allPending.filter(i => !isEventTimePast(i));
