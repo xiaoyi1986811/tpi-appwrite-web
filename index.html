@@ -31876,6 +31876,45 @@ window.__tpi_syncDateToMain = function(){
     return `${safeUser}_${safeDate}`;
   }
 
+  // ===================== PATCH: Cross-browser Cloud Sync Robustness (Future Radar) =====================
+  // 目标：
+  //  1) 任何浏览器都不因缺失函数而中断同步下载/渲染
+  //  2) Future Radar 关键键强制纳入上传包，并在下载后强制重载+渲染
+  //  3) 不改变页面其它模块的布局/结构/功能，仅增加兜底
+  (function(){
+    // safe logger (某些构建缺失 __tpi_log 会导致同步流程中断)
+    if (typeof window.__tpi_log !== 'function') {
+      window.__tpi_log = function(){ try{ console.log.apply(console, arguments); }catch(e){} };
+    }
+    // 兼容：某些分支引用 calculateSleepScore，但函数未定义会导致 tpiLoadToday 中断
+    if (typeof window.calculateSleepScore !== 'function') {
+      window.calculateSleepScore = function(){ return 0; };
+    }
+    // 兼容：AutoSaveManager.init 缺失会在初始化/恢复过程中报错
+    window.AutoSaveManager = window.AutoSaveManager || {};
+    if (typeof window.AutoSaveManager.init !== 'function') {
+      window.AutoSaveManager.init = function(){ return true; };
+    }
+    // 兼容：FutureRadar 某些回调缺失（例如 handleFileUpload）会在恢复UI时抛错
+    window.FutureRadar = window.FutureRadar || {};
+    if (typeof window.FutureRadar.handleFileUpload !== 'function') {
+      window.FutureRadar.handleFileUpload = function(){ /* noop */ };
+    }
+    // 辅助：强制 Future Radar 从存储重载并渲染（不会抛出到外层）
+    window.__tpi_forceRenderFutureRadar = function(reason){
+      try{
+        var FR = window.FutureRadar;
+        if (!FR) return;
+        if (typeof FR.loadData === 'function') { try{ FR.loadData(); }catch(e){} }
+        if (typeof FR.render === 'function') { try{ FR.render(); }catch(e){} }
+        // 有些版本使用 renderAll / renderUI
+        if (typeof FR.renderAll === 'function') { try{ FR.renderAll(); }catch(e){} }
+        if (typeof FR.renderUI === 'function') { try{ FR.renderUI(); }catch(e){} }
+      }catch(e){}
+    };
+  })();
+  // ===================== END PATCH =====================
+
   window.tpiSaveToday = async function () {
     try{
     console.log('📤 ═════════════════════════════════════════════════════');
@@ -31897,6 +31936,9 @@ window.__tpi_syncDateToMain = function(){
       }
 
       // 1) 确保把"当前页面输入"写入本地（否则云端拿到的是旧数据）
+      // 1x) 【关键修复】Future Radar：强制把当前编辑落盘，避免上传到云端的是旧数据
+      try { if (window.FutureRadar && typeof window.FutureRadar.saveData === 'function') window.FutureRadar.saveData(); } catch(e) { console.warn('[云同步] FutureRadar.saveData 失败(忽略):', e); }
+
       __tpi_setMainDate(dateStr);
       // 1a) 触发所有输入框的input/change事件，确保动态计算分数同步写入
       try {
@@ -31940,31 +31982,30 @@ window.__tpi_syncDateToMain = function(){
         if (tpiEl) __tpi_total_score_upload = (tpiEl.value || tpiEl.textContent || '').trim();
       } catch(e) {}
 
-      
-      // ✅ [FIX] 确保「未来事件雷达」最新编辑已落盘（否则上传可能拿到旧数据）
-      try {
-        if (window.FutureRadar && typeof window.FutureRadar.saveData === 'function') {
-          window.FutureRadar.saveData();
-          console.log('✅ [上传][FIX] 已强制保存未来事件雷达数据');
-        }
-      } catch(e) { console.warn('⚠️ [上传][FIX] FutureRadar.saveData 失败(忽略):', e); }
-// 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
+      // 2) 从 localStorage 打包（最完整结构：直接全量备份 localStorage）
       console.log('📦 [上传] 正在打包 localStorage 数据...');
       const payload = {};
       // IndexedDB唯一数据源版：从内存缓存打包，不依赖 localStorage
       const __memCache = window.__tpi_mem_cache || {};
       Object.keys(__memCache).forEach(function(k){ payload[k] = __memCache[k]; });
-
-      // ✅ [FIX] 强制合并 Future Radar 相关键（避免未写入 mem_cache 导致云端缺失/回滚）
-      const __radarKeys = ['tpi_radar_events_v3','tpi_radar_push_config','tpi_radar_sort_mode_v3','tpi_radar_worker_url','tpi_radar_events_v2'];
-      try {
-        __radarKeys.forEach(function(k){
-          try {
-            const v = (typeof window.__tpi_ls_get === 'function') ? window.__tpi_ls_get(k) : null;
-            if (v !== null && v !== undefined) payload[k] = v;
-          } catch(e) {}
+      // 2x) 【关键修复】Future Radar：强制把雷达相关键合并进上传包（不依赖 __tpi_mem_cache 是否包含）
+      try{
+        const __RADAR_KEYS = [
+          'tpi_radar_events_v3',
+          'tpi_radar_events_v2',
+          'tpi_radar_push_config',
+          'tpi_radar_sort_mode_v3',
+          'tpi_radar_worker_url',
+          'tpi_radar_view_state',
+          'tpi_radar_filters'
+        ];
+        __RADAR_KEYS.forEach(k=>{
+          try{
+            const v = (typeof __tpi_ls_get === 'function') ? __tpi_ls_get(k) : null;
+            if (v != null) payload[k] = v;
+          }catch(_e){}
         });
-      } catch(e) {}
+      }catch(e){ console.warn('[云同步] Radar keys merge failed(ignored):', e); }
 
       const dataStr = JSON.stringify(payload);
       console.log(`📊 [上传] 数据统计: ${Object.keys(payload).length} 个键, ${dataStr.length} 字符 (${(dataStr.length/1024).toFixed(2)} KB)`);
@@ -32129,6 +32170,12 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
 // 让页面把 localStorage 重新渲染到 UI
       __tpi_setMainDate(dateStr);
 
+      // ✅【关键修复】Future Radar：下载后强制从存储重载并渲染（跨浏览器一致）
+      try { if (typeof window.__tpi_forceRenderFutureRadar === 'function') window.__tpi_forceRenderFutureRadar('after-cloud-download'); } catch(e) {}
+      // 再做一次延迟渲染，覆盖 IndexedDB/缓存异步写入时序
+      try { setTimeout(function(){ try{ if (typeof window.__tpi_forceRenderFutureRadar === 'function') window.__tpi_forceRenderFutureRadar('after-cloud-download-delay'); }catch(e){} }, 120); } catch(e) {}
+
+
       // ✅ 【关键修复】：强制使用restoreUIFromData进行完整恢复
       // 这确保所有输入、勾选、分数、评级、图表等都能被正确恢复
       let __uiRestored = false;
@@ -32283,24 +32330,12 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
       
       // 步骤6：最终兜底 - 如果完全没有恢复成功，才刷新页面
       if (!__uiRestored && !dayData) {
-        console.log('⚠️ [下载][FIX] 未能通过函数完全恢复UI：执行模块级重渲染兜底（不刷新页面）...');
+        console.log('⚠️ [下载] 未能通过函数恢复UI，将刷新页面...');
+        try { 
+          setTimeout(() => location.reload(), 500); 
+        } catch(_){}
       }
-      // ✅ [FIX] 无论是否完全恢复，都强制 FutureRadar 重新读取并渲染（确保云端下载后全部事件可见）
-      try {
-        if (window.FutureRadar && typeof window.FutureRadar.loadData === 'function') window.FutureRadar.loadData();
-        if (window.FutureRadar && typeof window.FutureRadar.render === 'function') window.FutureRadar.render();
-      } catch(e) { console.warn('⚠️ [下载][FIX] FutureRadar 重渲染失败(忽略):', e); }
 
-
-      // ✅ [FIX] 下载后再延迟一次 FutureRadar 重载（确保 IDB 写入/预载时序下也能完整渲染）
-      try {
-        setTimeout(function(){
-          try {
-            if (window.FutureRadar && typeof window.FutureRadar.loadData === 'function') window.FutureRadar.loadData();
-            if (window.FutureRadar && typeof window.FutureRadar.render === 'function') window.FutureRadar.render();
-          } catch(e) {}
-        }, 120);
-      } catch(e) {}
 const __download_end_time = Date.now();
       console.log(`⏱️ [下载] 总耗时: ${__download_end_time - __download_start_time}ms`);
 
