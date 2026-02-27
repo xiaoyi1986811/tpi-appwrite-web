@@ -4451,6 +4451,19 @@ if (typeof window.showModal === 'undefined') {
         
         // 确认按钮
         const confirmBtn = content.querySelector('.modal-confirm-btn');
+
+      // 兜底：无论按钮事件绑定是否失效，都保证“知道了/取消/×”可以关闭
+      const __delegateClose = (e) => {
+        const t = e.target;
+        if (!t) return;
+        if (t.closest && (t.closest('.modal-confirm-btn') || t.closest('.modal-cancel-btn') || t.closest('.modal-close-btn'))) {
+          e.preventDefault?.();
+          e.stopPropagation?.();
+          closeModal();
+        }
+      };
+      overlay.addEventListener('click', __delegateClose, true);
+
         if (confirmBtn) {
             confirmBtn.addEventListener('click', (e) => { try{ e.preventDefault(); e.stopPropagation(); }catch(_){ }
                 console.log('✅ [showModal] 用户点击确认');
@@ -31481,6 +31494,13 @@ try{
     client.setEndpoint(APPWRITE_ENDPOINT)
     .setProject(APPWRITE_PROJECT_ID);
 
+    // ✅ 兼容浏览器阻止第三方Cookie：优先使用JWT登录态（避免下载/刷新后反复要求输入邮箱密码）
+    try {
+      const savedJwt = localStorage.getItem('tpi_appwrite_jwt');
+      if (savedJwt) client.setJWT(savedJwt);
+    } catch(e) {}
+
+
 var account = window.__appwriteAccount || (window.__appwriteAccount = new Appwrite.Account(client));
 var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new Appwrite.Databases(client));
 
@@ -31495,6 +31515,9 @@ var databases = window.__appwriteDatabases || (window.__appwriteDatabases = new 
   // 当前会话（Appwrite 自动管理）
   let TPI_CURRENT_USER = null;
   let TPI_CURRENT_PASSWORD = null;
+
+    try { localStorage.removeItem('tpi_appwrite_jwt'); } catch(e) {}
+    try { client.setJWT(''); } catch(e) {}
 
   function tpiShowMsg(elementId, text, isError){
     const ids = [elementId];
@@ -31683,6 +31706,19 @@ window.__tpi_syncDateToMain = function(){
     try{
       // 调用 Appwrite 登录 API（创建邮箱会话）
       const session = await account.createEmailSession(username, password);
+
+      // ✅ 生成JWT并持久化：避免Cookie被拦截导致“同步下载后又要重新登录”
+      try {
+        const jwtRes = await account.createJWT();
+        const jwt = jwtRes && (jwtRes.jwt || jwtRes.secret || jwtRes.token);
+        if (jwt) {
+          localStorage.setItem('tpi_appwrite_jwt', jwt);
+          client.setJWT(jwt);
+        }
+      } catch(e) {
+        console.warn('[Login] createJWT failed:', e);
+      }
+
       console.log('✅ 登录成功:', session);
 
       // 获取用户信息
