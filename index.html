@@ -32328,12 +32328,25 @@ console.log(`✅ [下载] localStorage恢复完成 (共 ${Object.keys(payload).l
       
       console.log('✅ [下载] 所有UI刷新和重新计算完成');
       
-      // 步骤6：最终兜底 - 如果完全没有恢复成功，才刷新页面
+      // 步骤6：最终兜底 - 如果完全没有恢复成功：⚠️ 禁止自动刷新（会导致登录态丢失，页面跳回邮箱/密码）
+// 改为：提示用户 + 尝试轻量重算，不破坏现有功能/结构
       if (!__uiRestored && !dayData) {
-        console.log('⚠️ [下载] 未能通过函数恢复UI，将刷新页面...');
-        try { 
-          setTimeout(() => location.reload(), 500); 
-        } catch(_){}
+        console.warn('⚠️ [下载] 自动恢复UI未成功（已禁止自动刷新以避免重新登录）。将尝试触发一次轻量重算。');
+        try {
+          if (typeof window.__tpi_triggerRecalc === 'function') window.__tpi_triggerRecalc();
+        } catch(e) {}
+        try {
+          if (window.FutureRadar && typeof window.FutureRadar.loadData === 'function') window.FutureRadar.loadData();
+          if (window.FutureRadar && typeof window.FutureRadar.render === 'function') window.FutureRadar.render();
+        } catch(e) {}
+        try {
+          var _toast = window.tpiToast || window.showToast || window.showNotification;
+          if (typeof _toast === 'function') {
+            _toast('⚠️ 同步下载完成，但自动恢复UI未成功：已禁止自动刷新（避免跳回登录）。如页面未更新，请手动点击“重新计算/刷新UI”或按 F5。', 'warning');
+          } else {
+            alert('⚠️ 同步下载完成，但自动恢复UI未成功：已禁止自动刷新（避免跳回登录）。如页面未更新，请手动点击“重新计算/刷新UI”或按 F5。');
+          }
+        } catch(e) {}
       }
 
 const __download_end_time = Date.now();
